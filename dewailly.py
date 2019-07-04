@@ -38,7 +38,9 @@ $
 """
 import argparse
 import getopt
+import hashlib
 import json
+import os
 import os.path
 import sys
 
@@ -62,9 +64,30 @@ def parseArgs(argv):
              if parsed.new_files_dir
              else None))
 
+def raiseError(e):
+    raise e
+
+def scanDirTree(top):
+    entries = []
+    for dirpath, _, filenames in os.walk(top, onerror=raiseError):
+        for filename in filenames:
+            filepath = os.path.join(dirpath, filename)
+            if os.path.islink(filepath) or not os.path.isfile(filepath):
+                sys.stderr.write('Skipping non-file %s\n' % (repr(filepath),))
+                continue
+            with open(filepath, "rb") as f:
+                entries.append({
+                    'sha256': hashlib.sha256(f.read()).hexdigest(),
+                    'filepath': os.path.relpath(filepath, top),
+                    'ctime': int(os.path.getctime(filepath)),
+                    'mtime': int(os.path.getmtime(filepath)),
+                    'size': os.path.getsize(filepath),
+                    })
+    return entries
+
 def doArchive(archive_dir):
     if not os.path.isdir(archive_dir):
-        throw ValueError('archive_dir is not a directory', archive_dir)
+        raise ValueError('archive_dir is not a directory', archive_dir)
     metadata_path = os.path.join(archive_dir, 'dewailly.archive_metadata.json.txt')
     if os.path.exists(metadata_path):
         with open(metadata_path) as f:
@@ -73,7 +96,7 @@ def doArchive(archive_dir):
     else:
         print 'Creating file %s' % (metadata_path,)
         metadata = {}
-
+    print scanDirTree(archive_dir)
     # Verified all files exist and their contents and metadata are unchanged.
     # No new files found.
 
@@ -84,6 +107,10 @@ def doNew(arg):
 
 if __name__ == '__main__':
     archive_dir, new_files_dir = parseArgs(sys.argv)
+    if new_files_dir and (
+        not os.path.relpath(archive_dir, new_files_dir).startswith('..') or
+        not os.path.relpath(new_files_dir, archive_dir).startswith('..')):
+        raise ValueError('one directory contains the other', archive_dir, new_files_dir)
     doArchive(archive_dir)
     if new_files_dir:
         doNew(archive_dir, new_files_dir)
