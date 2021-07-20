@@ -19,16 +19,20 @@
 //!    - Remembers files that you delete.
 //!
 //! ## Install
-//! ```
+//! ```text
 //! $ cargo install deduposaur
 //! ```
 //!
 //! ## Create a New Archive
-//! ```
+//! First create an empty `deduposaur.archive_metadata.json` file:
+//! ```text
 //! $ cd /my_archive
 //! $ ls
 //! 1.jpg 2.jpg 3.jpg 4.jpg 5.jpg
 //! $ touch deduposaur.archive_metadata.json
+//! ```
+//! Then run `deduposaur`:
+//! ```text
 //! $ deduposaur --verify_and_update_archive=.
 //! 1.jpg is new
 //! 2.jpg is new
@@ -40,14 +44,16 @@
 //! ```
 //!
 //! ## Check Your Archive
-//! ```
+//! To check your archive, simply run `deduposaur` again:
+//! ```text
 //! $ deduposaur --verify_and_update_archive=/my_archive
 //! Verified /my_archive
 //! $
 //! ```
 //!
 //! ## Update your Archive
-//! ```
+//! After updating your archive, run `deduposaur` again and respond to the prompts:
+//! ```text
 //! $ cd /my_archive
 //! $ ls
 //! deduposaur.archive_metadata.json 1.jpg 2.jpg 3.jpg 4.jpg 5.jpg
@@ -71,7 +77,7 @@
 //!
 //! ## Add Files to Your Archive
 //! First, run `deduposaur` on the new files:
-//! ```
+//! ```text
 //! $ cd /new_files
 //! $ ls
 //! 1.jpg 2.jpg 3.jpg 4.jpg 5.jpg 6.jpg 7.jpg
@@ -87,8 +93,8 @@
 //! ```
 //!
 //! Second, go through through the files.
-//! Move some to `/my_archive/` and delete the rest.
-//! ```
+//! Move some to your archive and delete the rest.
+//! ```text
 //! $ rm DUPE.1.jpg
 //! $ rm DUPE.2.jpg
 //! $ rm DELETED.3.jpg
@@ -102,7 +108,7 @@
 //! ```
 //!
 //! Finally, run `deduposaur` again to update your archive and remember the deleted files.
-//! ```
+//! ```text
 //! $ deduposaur --verify_and_update_archive=/my_archive --rename_known_files_check_new_and_remember_deletions=/new_files
 //! /my_archive/4.jpg is replaced by 4.jpg
 //! /my_archive/6.jpg is new
