@@ -6,7 +6,7 @@ To verify your archive:
 $ cd /my_archive
 $ ls
 archive_metadata.json.txt Movies/ Music/ Photos/ Projects/
-$ dewailly.py --verify-archive-and-update-metadata=.
+$ dewailly.py --verify_archive_and_detect_added_files=.
 Read 12891 files from /my_archive/dewailly.archive_metadata.json.txt
 Verified all files exist and their contents and metadata are unchanged.
 No new files found.
@@ -14,7 +14,7 @@ $
 
 To prepare to add some new files to your archive:
 $ cd /new_files
-$ dwailly.py --verify-archive-and-update-metadata=/my_archive --rename_known_files_check_new_and_remember_deletions=.
+$ dwailly.py --verify_archive_and_detect_added_files=/my_archive --rename_known_files_check_new_and_remember_deletions=.
 Read 12891 files from /my_archive/dewailly.archive_metadata.json.txt
 Read 6273 deletions from /my_archive/dewailly.deletions.json.txt
 File /new_files/dewailly.new_files_metadata.json.txt does not exist.  Creating it.
@@ -25,7 +25,7 @@ $
 
 Now go through through the new and renamed files.  Move some to /my_archive/ and delete the rest.  Then run the program again to update your archive's metdata file and remember the deletions.
 
-$ dwailly.py --verify-archive-and-update-metadata=/my_archive --rename_known_files_check_new_and_remember_deletions=.
+$ dwailly.py --verify_archive_and_detect_added_files=/my_archive --rename_known_files_check_new_and_remember_deletions=.
 Read 12891 files from /my_archive/dewailly.archive_metadata.json.txt
 Verified all files exist and their contents and metadata are unchanged.
 Found 76 new files under /my_archive.  Remembered them in /my_archive/dewailly.archive_metadata.json.txt
@@ -44,12 +44,61 @@ import os
 import os.path
 import sys
 
+class Record:
+    def __init__(self, root_dir_path, relative_path, sha256, ctime, mtime, size):
+        self.root_dir_path = root_dir_path
+        self.relative_path = relative_path
+        self.sha256 = sha256
+        self.ctime = ctime
+        self.mtime = mtime
+        self.size = size
+
+    def __str__(self):
+        return 'Record{root_dir_path=%s relative_path=%s sha256=%s ctime=%s mtime=%s size=%s}' % (
+          self.root_dir_path, self.relative_path, self.sha256, self.ctime, self.mtime, self.size)
+
+    def toDict(self):
+        return {
+            'root_dir_path': self.root_dir_path,
+            'relative_path': self.relative_path,
+            'sha256': self.sha256,
+            'ctime': self.ctime,
+            'mtime': self.mtime,
+            'size': self.size
+            }
+
+    @staticmethod
+    def fromFile(self, root_dir_path, relative_path):
+        try:
+            filepath = os.path.join(root_dir_path, relative_path)
+            with open(filepath, "rb") as f:
+                return Record(
+                    root_dir_path,
+                    relative_path,
+                    hashlib.sha256(f.read()).hexdigest(),
+                    int(os.path.getctime(filepath)),
+                    int(os.path.getmtime(filepath)),
+                    os.path.getsize(filepath))
+        except (e):
+            raise Exception('Exception for %s %s: %s', root_dir_path, relative_path, e)
+
+
+#     @staticmethod
+#     def fromJsonObject(self, root_dir_path, json_object):
+#         relative_path = json_object['relative_path']
+#         assert relative_path is string
+#         assert !relative_path.empty
+#         assert !relative_path.contains('..')
+#
+#                                     json_object['sha256'],
+#                                     json_object['ctime'],
+#                                     json_object['mtime'],
+#                                     json_object['size'],
+
 def parseArgs(argv):
-    parser = argparse.ArgumentParser(
-        description='Process some integers.',
-        prog=argv[0])
+    parser = argparse.ArgumentParser(prog=argv[0])
     parser.add_argument(
-        '--verify-archive-and-update-metadata',
+        '--verify_archive_and_detect_added_files',
         dest='archive_dir',
         required=True,
         help='path of archive directory')
@@ -60,9 +109,7 @@ def parseArgs(argv):
         help='path of directory with new files')
     parsed = parser.parse_args(argv[1:])
     return (os.path.abspath(parsed.archive_dir),
-            (os.path.abspath(parsed.new_files_dir)
-             if parsed.new_files_dir
-             else None))
+        (os.path.abspath(parsed.new_files_dir) if parsed.new_files_dir else None))
 
 def raiseError(e):
     raise e
@@ -96,7 +143,8 @@ def doArchive(archive_dir):
     else:
         print 'Creating file %s' % (metadata_path,)
         metadata = {}
-    print scanDirTree(archive_dir)
+    for entry in scanDirTree(archive_dir):
+        
     # Verified all files exist and their contents and metadata are unchanged.
     # No new files found.
 
