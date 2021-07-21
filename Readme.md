@@ -33,7 +33,7 @@ $ touch deduposaur.archive_metadata.json
 ```
 Then run `deduposaur`:
 ```
-$ deduposaur --verify_and_update_archive=.
+$ deduposaur --archive=.
 1.jpg is new
 2.jpg is new
 3.jpg is new
@@ -46,7 +46,7 @@ $
 ## Check Your Archive
 To check your archive, simply run `deduposaur` again:
 ```
-$ deduposaur --verify_and_update_archive=/my_archive
+$ deduposaur --archive=/my_archive
 Verified /my_archive
 $
 ```
@@ -61,7 +61,7 @@ $ mv 2.jpg 2.hawaii.jpg
 $ rm 3.jpg
 $ echo 'corrupted' > 4.jpg
 $ touch 5.jpg
-$ deduposaur --verify_and_update_archive=.
+$ deduposaur --archive=.
 WARNING 2.jpg is renamed to 2.hawaii.jpg
 Accept (y/n) or revert (r)? y
 WARNING 3.jpg is deleted
@@ -71,19 +71,19 @@ Accept change? (y/n) n
 WARNING 5.jpg mtime changed 2021-07-10T12:30:00-0700 -> 2021-07-20T15:11:03-0700
 Accept (y/n) or revert (r)? r
 $ cp /another_backup/4.jpg .
-$ deduposaur --verify_and_update_archive=.
+$ deduposaur --archive=.
 Verified .
 ```
 
 ## Add Files to Your Archive
-First, run `deduposaur` on the new files:
+First, run `deduposaur` and it will record metadata of new files and rename known files:
 ```
 $ cd /new_files
 $ ls
 1.jpg 2.jpg 3.jpg 4.jpg 5.jpg 6.jpg 7.jpg
-$ deduposaur --verify_and_update_archive=/my_archive --rename_known_files_check_new_and_remember_deletions=.
+$ deduposaur --archive=/my_archive --process=.
 Verified /my_archive
-Created deduposaur.new_files_metadata.json
+Created deduposaur.process_metadata.json
 Renamed DUPE.1.jpg - /my_archive/1.jpg
 Renamed DUPE.2.jpg - /my_archive/2.hawaii.jpg
 Renamed DELETED.3.jpg
@@ -103,22 +103,20 @@ $ rm METADATA.5.jpg
 $ mv 6.jpg /my_archive/
 $ rm 7.jpg
 $ ls
-deduposaur.new_files_metadata.json
+deduposaur.process_metadata.json
 $
 ```
 
 Finally, run `deduposaur` again to update your archive and remember the deleted files.
 ```
-$ deduposaur --verify_and_update_archive=/my_archive --rename_known_files_check_new_and_remember_deletions=/new_files
+$ deduposaur --archive=/my_archive --process=.
 /my_archive/4.jpg is replaced by 4.jpg
 /my_archive/6.jpg is new
 Verified /my_archive
 METADATA.5.jpg was deleted
 7.jpg was deleted
-Deleting deduposaur.new_files_metadata.json since it is now empty.
+Deleting deduposaur.process_metadata.json since it is now empty.
 $ ls
-$ cd ..
-$ rmdir /new_files
 $
 ```
 

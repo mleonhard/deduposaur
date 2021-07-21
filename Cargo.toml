@@ -12,6 +12,7 @@ repository = "https://github.com/mleonhard/deduposaur"
 version = "0.1.0"
 
 [dependencies]
+structopt = "^0.3.22"
 
 [dev-dependencies]
 assert_cmd = "1"
