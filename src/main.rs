@@ -83,7 +83,7 @@
 //! 1.jpg 2.jpg 3.jpg 4.jpg 5.jpg 6.jpg 7.jpg
 //! $ deduposaur --verify_and_update_archive=/my_archive --rename_known_files_check_new_and_remember_deletions=.
 //! Verified /my_archive
-//! Created deduposaur.new_files_metadata.json
+//! Created deduposaur.files_metadata.json
 //! Renamed DUPE.1.jpg - /my_archive/1.jpg
 //! Renamed DUPE.2.jpg - /my_archive/2.hawaii.jpg
 //! Renamed DELETED.3.jpg
@@ -103,7 +103,7 @@
 //! $ mv 6.jpg /my_archive/
 //! $ rm 7.jpg
 //! $ ls
-//! deduposaur.new_files_metadata.json
+//! deduposaur.files_metadata.json
 //! $
 //! ```
 //!
@@ -115,7 +115,7 @@
 //! Verified /my_archive
 //! METADATA.5.jpg was deleted
 //! 7.jpg was deleted
-//! Deleting deduposaur.new_files_metadata.json since it is now empty.
+//! Deleting deduposaur.files_metadata.json since it is now empty.
 //! $ ls
 //! $ cd ..
 //! $ rmdir /new_files
@@ -125,6 +125,21 @@
 //! # TO DO
 //! - Integration tests
 //! - Make tests pass.
+use std::io::Write;
+
+const ARCHIVE_METADATA_JSON: &'static str = "deduposaur.archive_metadata.json";
+
 fn main() {
-    println!("Deduposaur");
+    if std::env::args().skip(1).next().is_none() {
+        writeln!(
+            std::io::stderr(),
+            "USAGE: deduposaur --verify_and_update_archive=ARCHIVE_DIR \
+             [--rename_known_files_check_new_and_remember_deletions=DIR2]\n\
+             Initialize a new archive: touch {}",
+            ARCHIVE_METADATA_JSON
+        )
+        .unwrap();
+        std::process::exit(1);
+    }
+    unimplemented!();
 }
