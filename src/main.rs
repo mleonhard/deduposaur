@@ -123,11 +123,14 @@
 //! # TO DO
 //! - Integration tests
 //! - Make tests pass.
-use std::io::Write;
-use std::path::PathBuf;
+//! - Switch away from libraries with unsafe code:
+//!    - `structopt` (WTF does command-line processing need unsafe code for?)
+//!    - `serde_json`
+//!    - `sha2`
+use serde::{Deserialize, Serialize};
+use serde_with::serde_as;
+use std::path::{Path, PathBuf};
 use structopt::StructOpt;
-
-const ARCHIVE_METADATA_JSON: &'static str = "deduposaur.archive_metadata.json";
 
 #[derive(Debug, StructOpt)]
 #[structopt(about)]
@@ -146,8 +149,46 @@ struct Opt {
     process: Option<PathBuf>,
 }
 
+pub fn read_json_file<T: for<'a> Deserialize<'a> + Default>(path: &Path) -> Result<T, String> {
+    let reader = std::fs::File::open(path)
+        .map_err(|e| format!("error reading {}: {}", path.to_string_lossy(), e))?;
+    let metadata = reader
+        .metadata()
+        .map_err(|e| format!("error reading {}: {}", path.to_string_lossy(), e))?;
+    if metadata.len() == 0 {
+        return Ok(Default::default());
+    }
+    serde_json::from_reader(reader)
+        .map_err(|e| format!("error reading {}: {}", path.to_string_lossy(), e))
+}
+
+#[serde_as]
+#[derive(Debug, Deserialize, Serialize)]
+pub struct FileDigest(#[serde_as(as = "serde_with::hex::Hex")] [u8; 32]);
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct FileRecord {
+    name: String,
+    mtime: u64,
+    digest: FileDigest,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ArchiveMetadata {
+    expected: Vec<FileRecord>,
+    deleted: Vec<FileRecord>,
+}
+impl Default for ArchiveMetadata {
+    fn default() -> Self {
+        ArchiveMetadata {
+            expected: Vec::new(),
+            deleted: Vec::new(),
+        }
+    }
+}
+
 fn main() {
-    let opt = Opt::from_args();
+    let opt: Opt = Opt::from_args();
     println!("{:?}", opt);
     if opt.archive.as_path().as_os_str().is_empty() {
         panic!("expected path, got empty string '--archive='");
@@ -157,5 +198,7 @@ fn main() {
             panic!("expected path, got empty string '--process='");
         }
     }
-    unimplemented!();
+    let archive_metadata_path = opt.archive.join("deduposaur.archive_metadata.json");
+    let archive_metadata: ArchiveMetadata = read_json_file(&archive_metadata_path).unwrap();
+    println!("archive_metadata {:?}", archive_metadata);
 }
