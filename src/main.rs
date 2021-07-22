@@ -129,6 +129,13 @@
 //!    - `sha2`
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
+use sha2::Digest;
+use std::collections::HashSet;
+use std::convert::TryFrom;
+use std::io::Read;
+use std::io::Write;
+use std::iter::FromIterator;
+use std::os::macos::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use structopt::StructOpt;
 
@@ -168,8 +175,8 @@ pub struct FileDigest(#[serde_as(as = "serde_with::hex::Hex")] [u8; 32]);
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct FileRecord {
-    name: String,
-    mtime: u64,
+    path: String,
+    mtime: i64,
     digest: FileDigest,
 }
 
@@ -187,7 +194,62 @@ impl Default for ArchiveMetadata {
     }
 }
 
-fn main() {
+fn read_file_digest(path: &Path) -> Result<FileDigest, String> {
+    let mut reader = std::fs::File::open(path)
+        .map_err(|e| format!("error reading {}: {}", path.to_string_lossy(), e))?;
+    let mut hasher = sha2::Sha256::new();
+    let mut buffer = [0_u8; 1024 * 1024];
+    loop {
+        let num_bytes_read = reader
+            .read(&mut buffer)
+            .map_err(|e| format!("error reading {}: {}", path.to_string_lossy(), e))?;
+        if num_bytes_read == 0 {
+            break;
+        }
+        hasher.update(&buffer[..num_bytes_read]);
+    }
+    Ok(FileDigest(hasher.finalize().into()))
+}
+
+fn walk_dir(path: &Path, records: &mut Vec<FileRecord>) -> Result<(), String> {
+    let mut dirs: Vec<PathBuf> = vec![path.to_path_buf()];
+    while let Some(dir) = dirs.pop() {
+        for entry_result in dir
+            .read_dir()
+            .map_err(|e| format!("error reading dir {}: {}", dir.to_string_lossy(), e))?
+        {
+            let entry = entry_result
+                .map_err(|e| format!("error reading dir {}: {}", dir.to_string_lossy(), e))?;
+            let metadata = entry
+                .metadata()
+                .map_err(|e| format!("error reading {}: {}", entry.path().to_string_lossy(), e))?;
+            if metadata.is_dir() {
+                dirs.push(entry.path());
+            } else if metadata.is_file() {
+                records.push(FileRecord {
+                    path: entry
+                        .path()
+                        .strip_prefix(path)
+                        .unwrap()
+                        .to_string_lossy()
+                        .to_string(),
+                    mtime: metadata.st_mtime(),
+                    digest: read_file_digest(&entry.path())?,
+                });
+            } else {
+                writeln!(
+                    std::io::stderr(),
+                    "WARNING Ignoring non-file {}",
+                    entry.path().to_string_lossy()
+                )
+                .unwrap();
+            }
+        }
+    }
+    Ok(())
+}
+
+fn main() -> Result<(), Box<String>> {
     let opt: Opt = Opt::from_args();
     println!("{:?}", opt);
     if opt.archive.as_path().as_os_str().is_empty() {
@@ -198,7 +260,30 @@ fn main() {
             panic!("expected path, got empty string '--process='");
         }
     }
+    let mut all_ok = true;
     let archive_metadata_path = opt.archive.join("deduposaur.archive_metadata.json");
-    let archive_metadata: ArchiveMetadata = read_json_file(&archive_metadata_path).unwrap();
-    println!("archive_metadata {:?}", archive_metadata);
+    let archive_metadata: ArchiveMetadata = read_json_file(&archive_metadata_path)?;
+    let mut archive_files: Vec<FileRecord> = Vec::new();
+    walk_dir(&opt.archive, &mut archive_files)?;
+    // TODO(mleonhard) Warn about changed files.
+    // TODO(mleonhard) Warn about deleted files.
+    // TODO(mleonhard) Warn about renamed files.
+    // TODO(mleonhard) Warn about files with changed mtime.
+    // TODO(mleonhard) Add new files.
+    // TODO(mleonhard) Write new archive_metadata file.
+    // let expected_set = HashSet::from_iter(archive_metadata.expected.iter().cloned());
+    // let actual_set = HashSet::from_iter(archive_files.iter().cloned());
+    // for record in expected_set.difference(&actual_set) {
+    //     writeln!(
+    //         std::io::stderr(),
+    //         "WARNING Ignoring non-file {}",
+    //         entry.path().to_string_lossy()
+    //     )
+    //     .unwrap();
+    // }
+    if all_ok {
+        println!("Verified {}", archive_metadata_path.to_string_lossy());
+    }
+    // TODO(mleonhard) Process files.
+    Ok(())
 }
