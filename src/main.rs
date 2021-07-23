@@ -170,8 +170,13 @@ pub fn read_json_file<T: for<'a> Deserialize<'a> + Default>(path: &Path) -> Resu
 }
 
 #[serde_as]
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
 pub struct FileDigest(#[serde_as(as = "serde_with::hex::Hex")] [u8; 32]);
+impl Debug for FileDigest {
+    fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
+        write!(f, "FileDigest({})", hex::encode(&self.0))
+    }
+}
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct FileRecord {
