@@ -21,6 +21,7 @@ structopt = "^0.3.22"
 
 [dev-dependencies]
 assert_cmd = "1"
+assert_that = "^0.1.2"
 filetime = "^0.2.14"
 predicates = "2"
 temp-dir = "^0.1.11"

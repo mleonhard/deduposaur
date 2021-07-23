@@ -28,10 +28,20 @@ checksum = "3d20831bd004dda4c7c372c19cdabff369f794a95e955b3f13fe460e3e1ae95f"
 dependencies = [
  "bstr",
  "doc-comment",
- "predicates",
+ "predicates 2.0.0",
  "predicates-core",
  "predicates-tree",
  "wait-timeout",
+]
+
+[[package]]
+name = "assert_that"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c82b40114c8a9f7f4910856c199475dd6ae805697148af5a4a46e2dfdb6ef75f"
+dependencies = [
+ "predicates 1.0.8",
+ "predicates-tree",
 ]
 
 [[package]]
@@ -147,8 +157,10 @@ name = "deduposaur"
 version = "0.1.0"
 dependencies = [
  "assert_cmd",
+ "assert_that",
  "filetime",
- "predicates",
+ "hex",
+ "predicates 2.0.0",
  "serde",
  "serde_json",
  "serde_with",
@@ -157,6 +169,12 @@ dependencies = [
  "temp-dir",
  "temp-file",
 ]
+
+[[package]]
+name = "difference"
+version = "2.0.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "524cbf6897b527295dff137cec09ecf3a05f4fddffd7dfcd1585403449e74198"
 
 [[package]]
 name = "difflib"
@@ -305,6 +323,19 @@ name = "opaque-debug"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "624a8340c38c1b80fd549087862da4ba43e08858af025b236e509b6649fc13d5"
+
+[[package]]
+name = "predicates"
+version = "1.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f49cfaf7fdaa3bfacc6fa3e7054e65148878354a5cfddcf661df4c851f8021df"
+dependencies = [
+ "difference",
+ "float-cmp",
+ "normalize-line-endings",
+ "predicates-core",
+ "regex",
+]
 
 [[package]]
 name = "predicates"

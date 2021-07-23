@@ -130,14 +130,18 @@
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use sha2::Digest;
-use std::collections::HashSet;
-use std::convert::TryFrom;
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::ffi::OsStr;
+use std::fmt::{Debug, Formatter};
 use std::io::Read;
 use std::io::Write;
 use std::iter::FromIterator;
 use std::os::macos::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use structopt::StructOpt;
+
+const ARCHIVE_METADATA_JSON: &'static str = "deduposaur.archive_metadata.json";
 
 #[derive(Debug, StructOpt)]
 #[structopt(about)]
@@ -170,7 +174,7 @@ pub fn read_json_file<T: for<'a> Deserialize<'a> + Default>(path: &Path) -> Resu
 }
 
 #[serde_as]
-#[derive(Clone, Deserialize, PartialEq, Serialize)]
+#[derive(Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct FileDigest(#[serde_as(as = "serde_with::hex::Hex")] [u8; 32]);
 impl Debug for FileDigest {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
@@ -178,7 +182,7 @@ impl Debug for FileDigest {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct FileRecord {
     path: String,
     mtime: i64,
@@ -225,6 +229,9 @@ fn walk_dir(path: &Path, records: &mut Vec<FileRecord>) -> Result<(), String> {
         {
             let entry = entry_result
                 .map_err(|e| format!("error reading dir {}: {}", dir.to_string_lossy(), e))?;
+            if entry.path() == OsStr::new(ARCHIVE_METADATA_JSON) {
+                continue;
+            }
             let metadata = entry
                 .metadata()
                 .map_err(|e| format!("error reading {}: {}", entry.path().to_string_lossy(), e))?;
@@ -242,12 +249,10 @@ fn walk_dir(path: &Path, records: &mut Vec<FileRecord>) -> Result<(), String> {
                     digest: read_file_digest(&entry.path())?,
                 });
             } else {
-                writeln!(
-                    std::io::stderr(),
+                println!(
                     "WARNING Ignoring non-file {}",
                     entry.path().to_string_lossy()
-                )
-                .unwrap();
+                );
             }
         }
     }
@@ -256,7 +261,6 @@ fn walk_dir(path: &Path, records: &mut Vec<FileRecord>) -> Result<(), String> {
 
 fn main() -> Result<(), Box<String>> {
     let opt: Opt = Opt::from_args();
-    println!("{:?}", opt);
     if opt.archive.as_path().as_os_str().is_empty() {
         panic!("expected path, got empty string '--archive='");
     }
@@ -266,11 +270,67 @@ fn main() -> Result<(), Box<String>> {
         }
     }
     let mut all_ok = true;
-    let archive_metadata_path = opt.archive.join("deduposaur.archive_metadata.json");
+    let archive_metadata_path = opt.archive.join(ARCHIVE_METADATA_JSON);
     let archive_metadata: ArchiveMetadata = read_json_file(&archive_metadata_path)?;
-    let mut archive_files: Vec<FileRecord> = Vec::new();
-    walk_dir(&opt.archive, &mut archive_files)?;
-    // TODO(mleonhard) Warn about changed files.
+    let expected: Vec<RefCell<FileRecord>> = archive_metadata
+        .expected
+        .iter()
+        .cloned()
+        .map(RefCell::new)
+        .collect();
+    let mut actual_records: Vec<FileRecord> = Vec::new();
+    walk_dir(&opt.archive, &mut actual_records)?;
+    let expected_path_mtime_to_record: HashMap<(String, i64), &RefCell<FileRecord>> =
+        HashMap::from_iter(
+            expected
+                .iter()
+                .map(|cell| ((cell.borrow().path.clone(), cell.borrow().mtime), cell)),
+        );
+    writeln!(
+        std::io::stderr(),
+        "expected_path_mtime_to_record {:?}",
+        expected_path_mtime_to_record
+    )
+    .unwrap();
+    writeln!(std::io::stderr(), "actual_records {:?}", actual_records).unwrap();
+    for actual_record in &actual_records {
+        if let Some(expected_record) =
+            expected_path_mtime_to_record.get(&(actual_record.path.clone(), actual_record.mtime))
+        {
+            writeln!(
+                std::io::stderr(),
+                "expected_digest {:?}",
+                expected_record.borrow().digest
+            )
+            .unwrap();
+            writeln!(
+                std::io::stderr(),
+                "actual_record.digest {:?}",
+                actual_record.digest
+            )
+            .unwrap();
+            if expected_record.borrow().digest != actual_record.digest {
+                all_ok = false;
+                println!("WARNING {} is changed", actual_record.path);
+                loop {
+                    println!("Accept change? (y/n) ");
+                    match std::io::stdin()
+                        .bytes()
+                        .next()
+                        .ok_or_else(|| "stdin closed".to_string())?
+                        .unwrap()
+                    {
+                        b'y' => {
+                            // TODO(mleonhard) Implement.
+                            break;
+                        }
+                        b'n' => break,
+                        _ => {}
+                    }
+                }
+            }
+        }
+    }
     // TODO(mleonhard) Warn about deleted files.
     // TODO(mleonhard) Warn about renamed files.
     // TODO(mleonhard) Warn about files with changed mtime.
