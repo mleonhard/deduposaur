@@ -171,7 +171,7 @@ fn test_changed() {
             dir.path().to_string_lossy()
         )));
     assert_that!(
-        &std::fs::read_to_string(ARCHIVE_METADATA_JSON).unwrap(),
+        &std::fs::read_to_string(dir.child(ARCHIVE_METADATA_JSON)).unwrap(),
         predicates::str::contains(
             "869ed4d9645d8f65f6650ff3e987e335183c02ebed99deccea2917c6fd7be006"
         )
@@ -217,3 +217,5 @@ fn test_renamed() {
     assert_eq!("contents1", &std::fs::read_to_string(&file1).unwrap());
     assert!(!file2.exists());
 }
+
+// TODO(mleonhard) Test json file backups.

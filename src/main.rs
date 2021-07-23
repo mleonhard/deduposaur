@@ -127,12 +127,12 @@
 //!    - `structopt` (WTF does command-line processing need unsafe code for?)
 //!    - `serde_json`
 //!    - `sha2`
+//! - Check json file backups for corruption.  Automatically accept them.
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use sha2::Digest;
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::collections::HashMap;
-use std::ffi::OsStr;
 use std::fmt::{Debug, Formatter};
 use std::io::Read;
 use std::io::Write;
@@ -173,6 +173,13 @@ pub fn read_json_file<T: for<'a> Deserialize<'a> + Default>(path: &Path) -> Resu
         .map_err(|e| format!("error reading {}: {}", path.to_string_lossy(), e))
 }
 
+pub fn write_json_file(value: &impl Serialize, path: &Path) -> Result<(), String> {
+    let writer = std::fs::File::create(path)
+        .map_err(|e| format!("error writing {}: {}", path.to_string_lossy(), e))?;
+    serde_json::to_writer(writer, value)
+        .map_err(|e| format!("error writing {}: {}", path.to_string_lossy(), e))
+}
+
 #[serde_as]
 #[derive(Clone, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct FileDigest(#[serde_as(as = "serde_with::hex::Hex")] [u8; 32]);
@@ -191,7 +198,7 @@ pub struct FileRecord {
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct ArchiveMetadata {
-    expected: Vec<FileRecord>,
+    expected: Vec<RefCell<FileRecord>>,
     deleted: Vec<FileRecord>,
 }
 impl Default for ArchiveMetadata {
@@ -229,7 +236,7 @@ fn walk_dir(path: &Path, records: &mut Vec<FileRecord>) -> Result<(), String> {
         {
             let entry = entry_result
                 .map_err(|e| format!("error reading dir {}: {}", dir.to_string_lossy(), e))?;
-            if entry.path() == OsStr::new(ARCHIVE_METADATA_JSON) {
+            if entry.path().starts_with(ARCHIVE_METADATA_JSON) {
                 continue;
             }
             let metadata = entry
@@ -272,17 +279,12 @@ fn main() -> Result<(), Box<String>> {
     let mut all_ok = true;
     let archive_metadata_path = opt.archive.join(ARCHIVE_METADATA_JSON);
     let archive_metadata: ArchiveMetadata = read_json_file(&archive_metadata_path)?;
-    let expected: Vec<RefCell<FileRecord>> = archive_metadata
-        .expected
-        .iter()
-        .cloned()
-        .map(RefCell::new)
-        .collect();
     let mut actual_records: Vec<FileRecord> = Vec::new();
     walk_dir(&opt.archive, &mut actual_records)?;
     let expected_path_mtime_to_record: HashMap<(String, i64), &RefCell<FileRecord>> =
         HashMap::from_iter(
-            expected
+            archive_metadata
+                .expected
                 .iter()
                 .map(|cell| ((cell.borrow().path.clone(), cell.borrow().mtime), cell)),
         );
@@ -294,13 +296,14 @@ fn main() -> Result<(), Box<String>> {
     .unwrap();
     writeln!(std::io::stderr(), "actual_records {:?}", actual_records).unwrap();
     for actual_record in &actual_records {
-        if let Some(expected_record) =
+        if let Some(expected_record_cell) =
             expected_path_mtime_to_record.get(&(actual_record.path.clone(), actual_record.mtime))
         {
+            let mut expected_record = expected_record_cell.borrow_mut();
             writeln!(
                 std::io::stderr(),
                 "expected_digest {:?}",
-                expected_record.borrow().digest
+                expected_record.digest
             )
             .unwrap();
             writeln!(
@@ -309,7 +312,7 @@ fn main() -> Result<(), Box<String>> {
                 actual_record.digest
             )
             .unwrap();
-            if expected_record.borrow().digest != actual_record.digest {
+            if expected_record.digest != actual_record.digest {
                 all_ok = false;
                 println!("WARNING {} is changed", actual_record.path);
                 loop {
@@ -321,7 +324,7 @@ fn main() -> Result<(), Box<String>> {
                         .unwrap()
                     {
                         b'y' => {
-                            // TODO(mleonhard) Implement.
+                            expected_record.digest.0 = actual_record.digest.0;
                             break;
                         }
                         b'n' => break,
@@ -336,19 +339,26 @@ fn main() -> Result<(), Box<String>> {
     // TODO(mleonhard) Warn about files with changed mtime.
     // TODO(mleonhard) Add new files.
     // TODO(mleonhard) Write new archive_metadata file.
-    // let expected_set = HashSet::from_iter(archive_metadata.expected.iter().cloned());
-    // let actual_set = HashSet::from_iter(archive_files.iter().cloned());
-    // for record in expected_set.difference(&actual_set) {
-    //     writeln!(
-    //         std::io::stderr(),
-    //         "WARNING Ignoring non-file {}",
-    //         entry.path().to_string_lossy()
-    //     )
-    //     .unwrap();
-    // }
     if all_ok {
         println!("Verified {}", archive_metadata_path.to_string_lossy());
     }
+    let temp_archive_metadata_path = {
+        let mut s = archive_metadata_path.clone().into_os_string();
+        s.push(".tmp");
+        PathBuf::from(s)
+    };
+    write_json_file(&archive_metadata, &temp_archive_metadata_path).unwrap();
+    // TODO(mleonhard) Skip replacing file if they are identical.
+    let backup_archive_metadata_path = {
+        let mut s = archive_metadata_path.clone().into_os_string();
+        s.push(format!(
+            ".{}~",
+            chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
+        ));
+        PathBuf::from(s)
+    };
+    std::fs::rename(&archive_metadata_path, &backup_archive_metadata_path).unwrap();
+    std::fs::rename(&temp_archive_metadata_path, &archive_metadata_path).unwrap();
     // TODO(mleonhard) Process files.
     Ok(())
 }

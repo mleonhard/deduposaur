@@ -123,5 +123,10 @@ $
 # TO DO
 - Integration tests
 - Make tests pass.
+- Switch away from libraries with unsafe code:
+   - `structopt` (WTF does command-line processing need unsafe code for?)
+   - `serde_json`
+   - `sha2`
+- Check json file backups for corruption.  Automatically accept them.
 
 License: Apache-2.0
