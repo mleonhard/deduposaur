@@ -319,96 +319,101 @@ impl PromptWithRevertResponse {
     }
 }
 
-fn main() -> Result<(), Box<String>> {
+fn get_opt() -> Opt {
     let opt: Opt = Opt::from_args();
     if opt.archive.as_path().as_os_str().is_empty() {
         panic!("expected path, got empty string '--archive='");
     }
-    if let Some(process) = opt.process {
+    if let Some(process) = &opt.process {
         if process.as_path().as_os_str().is_empty() {
             panic!("expected path, got empty string '--process='");
         }
     }
+    opt
+}
+
+fn check_for_existing_and_changed_files(
+    expected_records: &Vec<RefCell<FileRecord>>,
+    actual_records: &mut Vec<FileRecord>,
+    archive_path: &Path,
+) -> Result<bool, String> {
     let mut all_ok = true;
-    let archive_metadata_path = opt.archive.join(ARCHIVE_METADATA_JSON);
-    let mut archive_metadata: ArchiveMetadata = read_json_file(&archive_metadata_path)?;
-    let mut actual_records: Vec<FileRecord> = Vec::new();
-    walk_dir(&opt.archive, &mut actual_records)?;
-    //writeln!(stderr(), "actual_records {:?}", actual_records).unwrap();
-    // Check for existing and changed files.
-    {
-        let index: HashMap<String, &RefCell<FileRecord>> = HashMap::from_iter(
-            archive_metadata
-                .expected
-                .iter()
-                .map(|cell| (cell.borrow().path.clone(), cell)),
-        );
-        for actual in actual_records.iter_mut().filter(|elem| !elem.processed) {
-            if let Some(expected_cell) = index.get(&actual.path) {
-                actual.processed = true;
-                let mut expected = expected_cell.borrow_mut();
-                expected.processed = true;
-                if expected.digest != actual.digest {
-                    println!("WARNING {} is changed", actual.path);
-                    if PromptResponse::prompt_and_read()? == PromptResponse::Yes {
-                        expected.digest.0 = actual.digest.0;
+    let index: HashMap<String, &RefCell<FileRecord>> = HashMap::from_iter(
+        expected_records
+            .iter()
+            .map(|cell| (cell.borrow().path.clone(), cell)),
+    );
+    for actual in actual_records.iter_mut().filter(|elem| !elem.processed) {
+        if let Some(expected_cell) = index.get(&actual.path) {
+            actual.processed = true;
+            let mut expected = expected_cell.borrow_mut();
+            expected.processed = true;
+            if expected.digest != actual.digest {
+                println!("WARNING {} is changed", actual.path);
+                if PromptResponse::prompt_and_read()? == PromptResponse::Yes {
+                    expected.digest.0 = actual.digest.0;
+                    expected.mtime = actual.mtime;
+                } else {
+                    all_ok = false;
+                }
+            } else if expected.mtime != actual.mtime {
+                println!(
+                    "WARNING {} mtime changed {} -> {}",
+                    actual.path,
+                    chrono::Local.timestamp(expected.mtime, 0).to_rfc3339(),
+                    chrono::Local.timestamp(actual.mtime, 0).to_rfc3339(),
+                );
+                match PromptWithRevertResponse::prompt_and_read()? {
+                    PromptWithRevertResponse::Yes => {
                         expected.mtime = actual.mtime;
-                    } else {
+                    }
+                    PromptWithRevertResponse::No => {
                         all_ok = false;
                     }
-                } else if expected.mtime != actual.mtime {
-                    println!(
-                        "WARNING {} mtime changed {} -> {}",
-                        actual.path,
-                        chrono::Local.timestamp(expected.mtime, 0).to_rfc3339(),
-                        chrono::Local.timestamp(actual.mtime, 0).to_rfc3339(),
-                    );
-                    match PromptWithRevertResponse::prompt_and_read()? {
-                        PromptWithRevertResponse::Yes => {
-                            expected.mtime = actual.mtime;
-                        }
-                        PromptWithRevertResponse::No => {
-                            all_ok = false;
-                        }
-                        PromptWithRevertResponse::Revert => {
-                            let path = opt.archive.join(&actual.path);
-                            filetime::set_file_mtime(
-                                &path,
-                                FileTime::from_unix_time(expected.mtime, 0),
-                            )
+                    PromptWithRevertResponse::Revert => {
+                        let path = archive_path.join(&actual.path);
+                        filetime::set_file_mtime(&path, FileTime::from_unix_time(expected.mtime, 0))
                             .map_err(|e| format!("error setting {:?} mtime: {}", path, e))?
-                        }
                     }
                 }
             }
         }
     }
-    // Check for renamed files.
-    {
-        let index: HashMap<(i64, FileDigest), &RefCell<FileRecord>> = HashMap::from_iter(
-            archive_metadata
-                .expected
-                .iter()
-                .filter(|elem| !elem.borrow().processed)
-                .map(|cell| ((cell.borrow().mtime, cell.borrow().digest.clone()), cell)),
-        );
-        for actual in actual_records.iter_mut().filter(|elem| !elem.processed) {
-            if let Some(expected_cell) = index.get(&(actual.mtime, actual.digest.clone())) {
-                actual.processed = true;
-                let mut expected = expected_cell.borrow_mut();
-                expected.processed = true;
-                if expected.path != actual.path {
-                    println!("WARNING {} is renamed to {}", expected.path, actual.path);
-                    if PromptResponse::prompt_and_read()? == PromptResponse::Yes {
-                        expected.path = actual.path.clone();
-                    } else {
-                        all_ok = false;
-                    }
+    Ok(all_ok)
+}
+
+fn check_for_renamed_files(
+    expected_records: &Vec<RefCell<FileRecord>>,
+    actual_records: &mut Vec<FileRecord>,
+) -> Result<bool, String> {
+    let mut all_ok = true;
+    let index: HashMap<(i64, FileDigest), &RefCell<FileRecord>> = HashMap::from_iter(
+        expected_records
+            .iter()
+            .filter(|elem| !elem.borrow().processed)
+            .map(|cell| ((cell.borrow().mtime, cell.borrow().digest.clone()), cell)),
+    );
+    for actual in actual_records.iter_mut().filter(|elem| !elem.processed) {
+        if let Some(expected_cell) = index.get(&(actual.mtime, actual.digest.clone())) {
+            actual.processed = true;
+            let mut expected = expected_cell.borrow_mut();
+            expected.processed = true;
+            if expected.path != actual.path {
+                println!("WARNING {} is renamed to {}", expected.path, actual.path);
+                if PromptResponse::prompt_and_read()? == PromptResponse::Yes {
+                    expected.path = actual.path.clone();
+                } else {
+                    all_ok = false;
                 }
             }
         }
     }
-    // All remaining unprocessed expected files must have been deleted.
+    Ok(all_ok)
+}
+
+fn check_for_deleted_files(archive_metadata: &mut ArchiveMetadata) -> Result<bool, String> {
+    let mut all_ok = true;
+    // Treat all remaining unprocessed expected files as deleted.
     let expected_copies: Vec<FileRecord> = archive_metadata
         .expected
         .iter()
@@ -426,7 +431,14 @@ fn main() -> Result<(), Box<String>> {
             all_ok = false;
         }
     }
-    // All remaining unprocessed actual files must be new.
+    Ok(all_ok)
+}
+
+fn check_for_new_files(
+    archive_metadata: &mut ArchiveMetadata,
+    actual_records: &mut Vec<FileRecord>,
+) {
+    // Treat all remaining unprocessed actual files as new.
     for actual in actual_records.iter_mut().filter(|elem| !elem.processed) {
         actual.processed = true;
         archive_metadata.expected.push(RefCell::new(actual.clone()));
@@ -434,9 +446,12 @@ fn main() -> Result<(), Box<String>> {
             (elem.mtime, &elem.path, &elem.digest) != (actual.mtime, &actual.path, &actual.digest)
         });
     }
-    if all_ok {
-        println!("Verified {}", opt.archive.to_string_lossy());
-    }
+}
+
+fn write_archive_metadata(
+    archive_metadata_path: &PathBuf,
+    archive_metadata: &ArchiveMetadata,
+) -> Result<(), String> {
     let temp_archive_metadata_path = {
         let mut s = archive_metadata_path.clone().into_os_string();
         s.push(".tmp");
@@ -452,8 +467,41 @@ fn main() -> Result<(), Box<String>> {
         ));
         PathBuf::from(s)
     };
-    std::fs::rename(&archive_metadata_path, &backup_archive_metadata_path).unwrap();
-    std::fs::rename(&temp_archive_metadata_path, &archive_metadata_path).unwrap();
+    std::fs::rename(&archive_metadata_path, &backup_archive_metadata_path).map_err(|e| {
+        format!(
+            "error renaming {:?} -> {:?}: {}",
+            archive_metadata_path.to_string_lossy(),
+            backup_archive_metadata_path.to_string_lossy(),
+            e
+        )
+    })?;
+    std::fs::rename(&temp_archive_metadata_path, &archive_metadata_path).map_err(|e| {
+        format!(
+            "error renaming {:?} -> {:?}: {}",
+            temp_archive_metadata_path.to_string_lossy(),
+            archive_metadata_path.to_string_lossy(),
+            e
+        )
+    })
+}
+
+fn main() -> Result<(), Box<String>> {
+    let opt = get_opt();
+    let archive_metadata_path = opt.archive.join(ARCHIVE_METADATA_JSON);
+    let mut archive_metadata: ArchiveMetadata = read_json_file(&archive_metadata_path)?;
+    let mut actual_records: Vec<FileRecord> = Vec::new();
+    walk_dir(&opt.archive, &mut actual_records)?;
+    let all_ok = check_for_existing_and_changed_files(
+        &archive_metadata.expected,
+        &mut actual_records,
+        &opt.archive,
+    )? & check_for_renamed_files(&archive_metadata.expected, &mut actual_records)?
+        & check_for_deleted_files(&mut archive_metadata)?;
+    check_for_new_files(&mut archive_metadata, &mut actual_records);
+    if all_ok {
+        println!("Verified {}", opt.archive.to_string_lossy());
+    }
+    write_archive_metadata(&archive_metadata_path, &archive_metadata)?;
     // TODO(mleonhard) Process files.
     Ok(())
 }
