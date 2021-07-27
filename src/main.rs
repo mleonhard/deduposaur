@@ -136,7 +136,7 @@ use sha2::Digest;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
-use std::io::{stderr, Read, Write};
+use std::io::Read;
 use std::iter::FromIterator;
 use std::os::macos::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -195,6 +195,8 @@ pub struct FileRecord {
     path: String,
     mtime: i64,
     digest: FileDigest,
+    #[serde(skip)]
+    processed: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -255,6 +257,7 @@ fn walk_dir(path: &Path, records: &mut Vec<FileRecord>) -> Result<(), String> {
                         .to_string(),
                     mtime: metadata.st_mtime(),
                     digest: read_file_digest(&entry.path())?,
+                    processed: false,
                 });
             } else {
                 println!(
@@ -324,45 +327,32 @@ fn main() -> Result<(), Box<String>> {
     }
     let mut all_ok = true;
     let archive_metadata_path = opt.archive.join(ARCHIVE_METADATA_JSON);
-    let archive_metadata: ArchiveMetadata = read_json_file(&archive_metadata_path)?;
+    let mut archive_metadata: ArchiveMetadata = read_json_file(&archive_metadata_path)?;
     let mut actual_records: Vec<FileRecord> = Vec::new();
     walk_dir(&opt.archive, &mut actual_records)?;
     //writeln!(stderr(), "actual_records {:?}", actual_records).unwrap();
-    // Check for changed files.
+    // Check for existing and changed files.
     {
-        let index: HashMap<(String, i64), &RefCell<FileRecord>> = HashMap::from_iter(
+        let index: HashMap<String, &RefCell<FileRecord>> = HashMap::from_iter(
             archive_metadata
                 .expected
                 .iter()
-                .map(|cell| ((cell.borrow().path.clone(), cell.borrow().mtime), cell)),
+                .map(|cell| (cell.borrow().path.clone(), cell)),
         );
-        for actual in &actual_records {
-            if let Some(expected_cell) = index.get(&(actual.path.clone(), actual.mtime)) {
+        for actual in actual_records.iter_mut().filter(|elem| !elem.processed) {
+            if let Some(expected_cell) = index.get(&actual.path) {
+                actual.processed = true;
                 let mut expected = expected_cell.borrow_mut();
+                expected.processed = true;
                 if expected.digest != actual.digest {
                     println!("WARNING {} is changed", actual.path);
                     if PromptResponse::prompt_and_read()? == PromptResponse::Yes {
                         expected.digest.0 = actual.digest.0;
+                        expected.mtime = actual.mtime;
                     } else {
                         all_ok = false;
                     }
-                }
-            }
-        }
-    }
-    // Check for changed mtimes.
-    {
-        let index: HashMap<(String, FileDigest), &RefCell<FileRecord>> =
-            HashMap::from_iter(archive_metadata.expected.iter().map(|cell| {
-                (
-                    (cell.borrow().path.clone(), cell.borrow().digest.clone()),
-                    cell,
-                )
-            }));
-        for actual in &actual_records {
-            if let Some(expected_cell) = index.get(&(actual.path.clone(), actual.digest.clone())) {
-                let mut expected = expected_cell.borrow_mut();
-                if expected.mtime != actual.mtime {
+                } else if expected.mtime != actual.mtime {
                     println!(
                         "WARNING {} mtime changed {} -> {}",
                         actual.path,
@@ -395,23 +385,16 @@ fn main() -> Result<(), Box<String>> {
             archive_metadata
                 .expected
                 .iter()
+                .filter(|elem| !elem.borrow().processed)
                 .map(|cell| ((cell.borrow().mtime, cell.borrow().digest.clone()), cell)),
         );
-        writeln!(stderr(), "index {:?}", index).unwrap();
-        for actual in &actual_records {
+        for actual in actual_records.iter_mut().filter(|elem| !elem.processed) {
             if let Some(expected_cell) = index.get(&(actual.mtime, actual.digest.clone())) {
+                actual.processed = true;
                 let mut expected = expected_cell.borrow_mut();
-                writeln!(
-                    stderr(),
-                    "{:?} {} expected={:?} actual={:?}",
-                    actual.digest,
-                    actual.mtime,
-                    expected.path,
-                    actual.path
-                )
-                .unwrap();
+                expected.processed = true;
                 if expected.path != actual.path {
-                    println!("WARNING {} is renamed to {}", expected.path, actual.path,);
+                    println!("WARNING {} is renamed to {}", expected.path, actual.path);
                     if PromptResponse::prompt_and_read()? == PromptResponse::Yes {
                         expected.path = actual.path.clone();
                     } else {
@@ -421,7 +404,24 @@ fn main() -> Result<(), Box<String>> {
             }
         }
     }
-    // TODO(mleonhard) Warn about deleted files.
+    // All remaining unprocessed expected files must have been deleted.
+    let expected_copies: Vec<FileRecord> = archive_metadata
+        .expected
+        .iter()
+        .filter(|elem| !elem.borrow().processed)
+        .map(|elem| elem.borrow().clone())
+        .collect();
+    for expected_copy in expected_copies {
+        println!("WARNING {} is deleted", expected_copy.path);
+        if PromptResponse::prompt_and_read()? == PromptResponse::Yes {
+            archive_metadata
+                .expected
+                .retain(|elem| *elem.borrow() != expected_copy);
+            archive_metadata.deleted.push(expected_copy);
+        } else {
+            all_ok = false;
+        }
+    }
     // TODO(mleonhard) Add new files.
     // TODO(mleonhard) Write new archive_metadata file.
     if all_ok {

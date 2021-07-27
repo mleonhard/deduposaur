@@ -149,7 +149,7 @@ fn test_contents_changed() {
     let dir = TempDir::new().unwrap();
     let file1 = dir.child("file1");
     std::fs::write(&file1, "contents2").unwrap();
-    filetime::set_file_mtime(&file1, FileTime::from_unix_time(TIME1, 0)).unwrap();
+    filetime::set_file_mtime(&file1, FileTime::from_unix_time(TIME2, 0)).unwrap();
     std::fs::write(
         dir.child(ARCHIVE_METADATA_JSON),
         r#"{"expected":[
@@ -181,6 +181,10 @@ fn test_contents_changed() {
         predicates::str::contains(
             "869ed4d9645d8f65f6650ff3e987e335183c02ebed99deccea2917c6fd7be006"
         )
+    );
+    assert_that!(
+        &std::fs::read_to_string(dir.child(ARCHIVE_METADATA_JSON)).unwrap(),
+        predicates::str::contains("1625166000")
     );
     Command::cargo_bin(BIN_NAME)
         .unwrap()
@@ -324,6 +328,56 @@ fn test_renamed() {
     assert_that!(
         &std::fs::read_to_string(dir.child(ARCHIVE_METADATA_JSON)).unwrap(),
         predicates::str::contains("file2")
+    );
+    Command::cargo_bin(BIN_NAME)
+        .unwrap()
+        .arg(format!("--archive={}", dir.path().to_string_lossy()))
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(format!(
+            "Verified {}",
+            dir.path().to_string_lossy()
+        )));
+}
+
+#[test]
+fn test_deleted() {
+    let dir = TempDir::new().unwrap();
+    let file1 = dir.child("file1");
+    std::fs::write(&file1, "contents1").unwrap();
+    filetime::set_file_mtime(&file1, FileTime::from_unix_time(TIME1, 0)).unwrap();
+    std::fs::write(
+        dir.child(ARCHIVE_METADATA_JSON),
+        r#"{"expected":[
+        {"path":"file1","mtime":1321038671,"digest":"809da78733fb34d7548ff1a8abe962ec865f8db07820e00f7a61ba79e2b6ff9f"},
+        {"path":"file2","mtime":1321038671,"digest":"809da78733fb34d7548ff1a8abe962ec865f8db07820e00f7a61ba79e2b6ff9f"}
+        ],"deleted":[]}"#,
+    )
+        .unwrap();
+    Command::cargo_bin(BIN_NAME)
+        .unwrap()
+        .arg(format!("--archive={}", dir.path().to_string_lossy()))
+        .write_stdin("n") // <------------
+        .assert()
+        .success()
+        .stdout(predicates::str::diff(format!(
+            "WARNING file2 is deleted\nAccept change? (y/n) \n"
+        )));
+    Command::cargo_bin(BIN_NAME)
+        .unwrap()
+        .arg(format!("--archive={}", dir.path().to_string_lossy()))
+        .write_stdin("y") // <------------
+        .assert()
+        .success()
+        .stdout(predicates::str::diff(format!(
+            "WARNING file2 is deleted\nAccept change? (y/n) \nVerified {}\n",
+            dir.path().to_string_lossy()
+        )));
+    assert_that!(
+        &std::fs::read_to_string(dir.child(ARCHIVE_METADATA_JSON)).unwrap(),
+        predicates::str::diff(
+            r#"{"expected":[{"path":"file1","mtime":1321038671,"digest":"809da78733fb34d7548ff1a8abe962ec865f8db07820e00f7a61ba79e2b6ff9f"}],"deleted":[{"path":"file2","mtime":1321038671,"digest":"809da78733fb34d7548ff1a8abe962ec865f8db07820e00f7a61ba79e2b6ff9f"}]}"#
+        )
     );
     Command::cargo_bin(BIN_NAME)
         .unwrap()
