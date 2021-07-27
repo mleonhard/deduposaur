@@ -141,8 +141,8 @@ fn test_new_file() {
         .arg(format!("--archive={}", dir.path().to_string_lossy()))
         .assert()
         .success()
-        .stdout(predicates::str::contains(format!(
-            "Verified {}",
+        .stdout(predicates::str::diff(format!(
+            "Verified {}\n",
             dir.path().to_string_lossy()
         )));
     assert_that!(
@@ -200,8 +200,8 @@ fn test_contents_changed() {
         .arg(format!("--archive={}", dir.path().to_string_lossy()))
         .assert()
         .success()
-        .stdout(predicates::str::contains(format!(
-            "Verified {}",
+        .stdout(predicates::str::diff(format!(
+            "Verified {}\n",
             dir.path().to_string_lossy()
         )));
 }
@@ -248,8 +248,8 @@ fn test_accept_mtime_change() {
         .arg(format!("--archive={}", dir.path().to_string_lossy()))
         .assert()
         .success()
-        .stdout(predicates::str::contains(format!(
-            "Verified {}",
+        .stdout(predicates::str::diff(format!(
+            "Verified {}\n",
             dir.path().to_string_lossy()
         )));
 }
@@ -296,8 +296,8 @@ fn test_revert_mtime_change() {
         .arg(format!("--archive={}", dir.path().to_string_lossy()))
         .assert()
         .success()
-        .stdout(predicates::str::contains(format!(
-            "Verified {}",
+        .stdout(predicates::str::diff(format!(
+            "Verified {}\n",
             dir.path().to_string_lossy()
         )));
 }
@@ -343,8 +343,8 @@ fn test_renamed() {
         .arg(format!("--archive={}", dir.path().to_string_lossy()))
         .assert()
         .success()
-        .stdout(predicates::str::contains(format!(
-            "Verified {}",
+        .stdout(predicates::str::diff(format!(
+            "Verified {}\n",
             dir.path().to_string_lossy()
         )));
 }
@@ -393,8 +393,8 @@ fn test_deleted() {
         .arg(format!("--archive={}", dir.path().to_string_lossy()))
         .assert()
         .success()
-        .stdout(predicates::str::contains(format!(
-            "Verified {}",
+        .stdout(predicates::str::diff(format!(
+            "Verified {}\n",
             dir.path().to_string_lossy()
         )));
 }
@@ -431,8 +431,8 @@ fn test_metadata_json_file_backups() {
         .arg(format!("--archive={}", dir.path().to_string_lossy()))
         .assert()
         .success()
-        .stdout(predicates::str::contains(format!(
-            "Verified {}",
+        .stdout(predicates::str::diff(format!(
+            "Verified {}\n",
             dir.path().to_string_lossy()
         )));
     assert_that!(
