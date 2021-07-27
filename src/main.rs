@@ -330,17 +330,14 @@ fn main() -> Result<(), Box<String>> {
     //writeln!(stderr(), "actual_records {:?}", actual_records).unwrap();
     // Check for changed files.
     {
-        let expected_path_mtime_to_record: HashMap<(String, i64), &RefCell<FileRecord>> =
-            HashMap::from_iter(
-                archive_metadata
-                    .expected
-                    .iter()
-                    .map(|cell| ((cell.borrow().path.clone(), cell.borrow().mtime), cell)),
-            );
+        let index: HashMap<(String, i64), &RefCell<FileRecord>> = HashMap::from_iter(
+            archive_metadata
+                .expected
+                .iter()
+                .map(|cell| ((cell.borrow().path.clone(), cell.borrow().mtime), cell)),
+        );
         for actual in &actual_records {
-            if let Some(expected_cell) =
-                expected_path_mtime_to_record.get(&(actual.path.clone(), actual.mtime))
-            {
+            if let Some(expected_cell) = index.get(&(actual.path.clone(), actual.mtime)) {
                 let mut expected = expected_cell.borrow_mut();
                 if expected.digest != actual.digest {
                     println!("WARNING {} is changed", actual.path);
@@ -355,32 +352,16 @@ fn main() -> Result<(), Box<String>> {
     }
     // Check for changed mtimes.
     {
-        let expected_path_digest_to_record: HashMap<(String, FileDigest), &RefCell<FileRecord>> =
+        let index: HashMap<(String, FileDigest), &RefCell<FileRecord>> =
             HashMap::from_iter(archive_metadata.expected.iter().map(|cell| {
                 (
                     (cell.borrow().path.clone(), cell.borrow().digest.clone()),
                     cell,
                 )
             }));
-        writeln!(
-            stderr(),
-            "expected_path_digest_to_record {:?}",
-            expected_path_digest_to_record
-        )
-        .unwrap();
         for actual in &actual_records {
-            if let Some(expected_cell) =
-                expected_path_digest_to_record.get(&(actual.path.clone(), actual.digest.clone()))
-            {
+            if let Some(expected_cell) = index.get(&(actual.path.clone(), actual.digest.clone())) {
                 let mut expected = expected_cell.borrow_mut();
-                writeln!(
-                    stderr(),
-                    "{:?} expected={:?} actual={:?}",
-                    actual.path,
-                    expected.mtime,
-                    actual.mtime
-                )
-                .unwrap();
                 if expected.mtime != actual.mtime {
                     println!(
                         "WARNING {} mtime changed {} -> {}",
@@ -408,8 +389,39 @@ fn main() -> Result<(), Box<String>> {
             }
         }
     }
+    // Check for renamed files.
+    {
+        let index: HashMap<(i64, FileDigest), &RefCell<FileRecord>> = HashMap::from_iter(
+            archive_metadata
+                .expected
+                .iter()
+                .map(|cell| ((cell.borrow().mtime, cell.borrow().digest.clone()), cell)),
+        );
+        writeln!(stderr(), "index {:?}", index).unwrap();
+        for actual in &actual_records {
+            if let Some(expected_cell) = index.get(&(actual.mtime, actual.digest.clone())) {
+                let mut expected = expected_cell.borrow_mut();
+                writeln!(
+                    stderr(),
+                    "{:?} {} expected={:?} actual={:?}",
+                    actual.digest,
+                    actual.mtime,
+                    expected.path,
+                    actual.path
+                )
+                .unwrap();
+                if expected.path != actual.path {
+                    println!("WARNING {} is renamed to {}", expected.path, actual.path,);
+                    if PromptResponse::prompt_and_read()? == PromptResponse::Yes {
+                        expected.path = actual.path.clone();
+                    } else {
+                        all_ok = false;
+                    }
+                }
+            }
+        }
+    }
     // TODO(mleonhard) Warn about deleted files.
-    // TODO(mleonhard) Warn about renamed files.
     // TODO(mleonhard) Add new files.
     // TODO(mleonhard) Write new archive_metadata file.
     if all_ok {

@@ -176,6 +176,12 @@ fn test_contents_changed() {
             "WARNING file1 is changed\nAccept change? (y/n) \nVerified {}\n",
             dir.path().to_string_lossy()
         )));
+    assert_that!(
+        &std::fs::read_to_string(dir.child(ARCHIVE_METADATA_JSON)).unwrap(),
+        predicates::str::contains(
+            "869ed4d9645d8f65f6650ff3e987e335183c02ebed99deccea2917c6fd7be006"
+        )
+    );
     Command::cargo_bin(BIN_NAME)
         .unwrap()
         .arg(format!("--archive={}", dir.path().to_string_lossy()))
@@ -185,12 +191,6 @@ fn test_contents_changed() {
             "Verified {}",
             dir.path().to_string_lossy()
         )));
-    assert_that!(
-        &std::fs::read_to_string(dir.child(ARCHIVE_METADATA_JSON)).unwrap(),
-        predicates::str::contains(
-            "869ed4d9645d8f65f6650ff3e987e335183c02ebed99deccea2917c6fd7be006"
-        )
-    );
 }
 
 #[test]
@@ -225,6 +225,11 @@ fn test_accept_mtime_change() {
             "WARNING file1 mtime changed 2011-11-11T11:11:11-08:00 -> 2021-07-01T12:00:00-07:00\nAccept (y/n) or revert (r)? \nVerified {}\n",
             dir.path().to_string_lossy()
         )));
+    assert_eq!(get_mtime(&file1), TIME2);
+    assert_that!(
+        &std::fs::read_to_string(dir.child(ARCHIVE_METADATA_JSON)).unwrap(),
+        predicates::str::contains(TIME2.to_string())
+    );
     Command::cargo_bin(BIN_NAME)
         .unwrap()
         .arg(format!("--archive={}", dir.path().to_string_lossy()))
@@ -234,11 +239,6 @@ fn test_accept_mtime_change() {
             "Verified {}",
             dir.path().to_string_lossy()
         )));
-    assert_eq!(get_mtime(&file1), TIME2);
-    assert_that!(
-        &std::fs::read_to_string(dir.child(ARCHIVE_METADATA_JSON)).unwrap(),
-        predicates::str::contains(TIME2.to_string())
-    );
 }
 
 #[test]
@@ -273,6 +273,11 @@ fn test_revert_mtime_change() {
             "WARNING file1 mtime changed 2011-11-11T11:11:11-08:00 -> 2021-07-01T12:00:00-07:00\nAccept (y/n) or revert (r)? \nVerified {}\n",
             dir.path().to_string_lossy()
         )));
+    assert_eq!(get_mtime(&file1), TIME1);
+    assert_that!(
+        &std::fs::read_to_string(dir.child(ARCHIVE_METADATA_JSON)).unwrap(),
+        predicates::str::contains(TIME1.to_string())
+    );
     Command::cargo_bin(BIN_NAME)
         .unwrap()
         .arg(format!("--archive={}", dir.path().to_string_lossy()))
@@ -282,17 +287,11 @@ fn test_revert_mtime_change() {
             "Verified {}",
             dir.path().to_string_lossy()
         )));
-    assert_eq!(get_mtime(&file1), TIME1);
-    assert_that!(
-        &std::fs::read_to_string(dir.child(ARCHIVE_METADATA_JSON)).unwrap(),
-        predicates::str::contains(TIME1.to_string())
-    );
 }
 
 #[test]
 fn test_renamed() {
     let dir = TempDir::new().unwrap();
-    let file1 = dir.child("file1");
     let file2 = dir.child("file2");
     std::fs::write(&file2, "contents1").unwrap();
     filetime::set_file_mtime(&file2, FileTime::from_unix_time(TIME1, 0)).unwrap();
@@ -310,10 +309,8 @@ fn test_renamed() {
         .assert()
         .success()
         .stdout(predicates::str::diff(format!(
-            "WARNING file1 is renamed to file2\nAccept (y/n) or revert (r)? \n"
+            "WARNING file1 is renamed to file2\nAccept change? (y/n) \n"
         )));
-    assert!(!file1.exists());
-    assert!(file2.exists());
     Command::cargo_bin(BIN_NAME)
         .unwrap()
         .arg(format!("--archive={}", dir.path().to_string_lossy()))
@@ -321,12 +318,22 @@ fn test_renamed() {
         .assert()
         .success()
         .stdout(predicates::str::diff(format!(
-            "WARNING file1 is renamed to file2\nAccept (y/n) or revert (r)? \nVerified {}",
+            "WARNING file1 is renamed to file2\nAccept change? (y/n) \nVerified {}\n",
             dir.path().to_string_lossy()
         )));
-    assert!(file1.exists());
-    assert_eq!("contents1", &std::fs::read_to_string(&file1).unwrap());
-    assert!(!file2.exists());
+    assert_that!(
+        &std::fs::read_to_string(dir.child(ARCHIVE_METADATA_JSON)).unwrap(),
+        predicates::str::contains("file2")
+    );
+    Command::cargo_bin(BIN_NAME)
+        .unwrap()
+        .arg(format!("--archive={}", dir.path().to_string_lossy()))
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(format!(
+            "Verified {}",
+            dir.path().to_string_lossy()
+        )));
 }
 
 // TODO(mleonhard) Test json file backups.
