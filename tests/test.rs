@@ -505,7 +505,7 @@ fn test_renames_dupe() {
         assert!(!process_sub2_file1.exists());
         assert!(process_sub2.join("DUPE.file1").exists());
         assert_that!(
-            &std::fs::read_to_string(archive.child(PROCESS_METADATA_JSON)).unwrap(),
+            &std::fs::read_to_string(process.child(PROCESS_METADATA_JSON)).unwrap(),
             predicates::str::diff(r#"[]"#)
         );
     };

@@ -143,6 +143,7 @@ use std::path::{Path, PathBuf};
 use structopt::StructOpt;
 
 const ARCHIVE_METADATA_JSON: &'static str = "deduposaur.archive_metadata.json";
+const PROCESS_METADATA_JSON: &'static str = "deduposaur.process_metadata.json";
 
 #[derive(Debug, StructOpt)]
 #[structopt(about)]
@@ -197,6 +198,15 @@ pub struct FileRecord {
     digest: FileDigest,
     #[serde(skip)]
     processed: bool,
+}
+impl FileRecord {
+    pub fn file_name(&self) -> String {
+        PathBuf::from(&self.path)
+            .file_name()
+            .unwrap()
+            .to_string_lossy()
+            .to_string()
+    }
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -480,7 +490,7 @@ fn write_archive_metadata(
         s.push(".tmp");
         PathBuf::from(s)
     };
-    write_json_file(&archive_metadata, &temp_archive_metadata_path).unwrap();
+    write_json_file(&archive_metadata, &temp_archive_metadata_path)?;
     if files_identical(&archive_metadata_path, &temp_archive_metadata_path)? {
         // Skip making a backup and replacing file.
         std::fs::remove_file(&temp_archive_metadata_path).map_err(|e| {
@@ -533,6 +543,7 @@ fn process_files(
 ) -> Result<(), String> {
     let mut records: Vec<FileRecord> = Vec::new();
     walk_dir(process_dir.as_ref(), &mut records)?;
+    records.retain(|record| !record.file_name().starts_with("DUPE."));
     // Rename dupes.
     let existing_paths: HashMap<(i64, FileDigest), String> =
         HashMap::from_iter(archive_metadata.expected.iter().map(|record_cell| {
@@ -554,6 +565,8 @@ fn process_files(
             )?;
         }
     }
+    let new_files: Vec<FileRecord> = Vec::new();
+    write_json_file(&new_files, &process_dir.join(PROCESS_METADATA_JSON))?;
     Ok(())
 }
 
