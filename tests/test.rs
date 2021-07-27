@@ -3,7 +3,7 @@ use assert_that::assert_that;
 use filetime::FileTime;
 use predicates::boolean::PredicateBooleanExt;
 use std::convert::TryInto;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 use temp_dir::TempDir;
 
@@ -25,6 +25,13 @@ fn get_mtime(p: impl AsRef<Path>) -> i64 {
         .try_into()
         .unwrap()
 }
+
+fn write_file(path: PathBuf, contents: impl AsRef<[u8]>, mtime: i64) -> PathBuf {
+    std::fs::write(&path, contents.as_ref()).unwrap();
+    filetime::set_file_mtime(&path, FileTime::from_unix_time(mtime, 0)).unwrap();
+    path
+}
+
 #[test]
 fn no_args() {
     Command::cargo_bin(BIN_NAME)
@@ -123,12 +130,8 @@ fn empty_archive_metadata_json() {
 #[test]
 fn test_new_file() {
     let dir = TempDir::new().unwrap();
-    let file1 = dir.child("file1");
-    std::fs::write(&file1, "contents1").unwrap();
-    filetime::set_file_mtime(&file1, FileTime::from_unix_time(TIME1, 0)).unwrap();
-    let file2 = dir.child("file2");
-    std::fs::write(&file2, "contents2").unwrap();
-    filetime::set_file_mtime(&file2, FileTime::from_unix_time(TIME2, 0)).unwrap();
+    write_file(dir.child("file1"), "contents1", TIME1);
+    write_file(dir.child("file2"), "contents2", TIME2);
     std::fs::write(
         dir.child(ARCHIVE_METADATA_JSON),
         r#"{"expected":[
@@ -156,9 +159,7 @@ fn test_new_file() {
 #[test]
 fn test_contents_changed() {
     let dir = TempDir::new().unwrap();
-    let file1 = dir.child("file1");
-    std::fs::write(&file1, "contents2").unwrap();
-    filetime::set_file_mtime(&file1, FileTime::from_unix_time(TIME2, 0)).unwrap();
+    write_file(dir.child("file1"), "contents2", TIME2);
     std::fs::write(
         dir.child(ARCHIVE_METADATA_JSON),
         r#"{"expected":[
@@ -209,9 +210,7 @@ fn test_contents_changed() {
 #[test]
 fn test_accept_mtime_change() {
     let dir = TempDir::new().unwrap();
-    let file1 = dir.child("file1");
-    std::fs::write(&file1, "contents1").unwrap();
-    filetime::set_file_mtime(&file1, FileTime::from_unix_time(TIME2, 0)).unwrap();
+    let file1 = write_file(dir.child("file1"), "contents1", TIME2);
     std::fs::write(
         dir.child(ARCHIVE_METADATA_JSON),
         r#"{"expected":[
@@ -257,9 +256,7 @@ fn test_accept_mtime_change() {
 #[test]
 fn test_revert_mtime_change() {
     let dir = TempDir::new().unwrap();
-    let file1 = dir.child("file1");
-    std::fs::write(&file1, "contents1").unwrap();
-    filetime::set_file_mtime(&file1, FileTime::from_unix_time(TIME2, 0)).unwrap();
+    let file1 = write_file(dir.child("file1"), "contents1", TIME2);
     std::fs::write(
         dir.child(ARCHIVE_METADATA_JSON),
         r#"{"expected":[
@@ -305,9 +302,7 @@ fn test_revert_mtime_change() {
 #[test]
 fn test_renamed() {
     let dir = TempDir::new().unwrap();
-    let file2 = dir.child("file2");
-    std::fs::write(&file2, "contents1").unwrap();
-    filetime::set_file_mtime(&file2, FileTime::from_unix_time(TIME1, 0)).unwrap();
+    write_file(dir.child("file2"), "contents1", TIME1);
     std::fs::write(
         dir.child(ARCHIVE_METADATA_JSON),
         r#"{"expected":[
@@ -352,9 +347,7 @@ fn test_renamed() {
 #[test]
 fn test_deleted() {
     let dir = TempDir::new().unwrap();
-    let file1 = dir.child("file1");
-    std::fs::write(&file1, "contents1").unwrap();
-    filetime::set_file_mtime(&file1, FileTime::from_unix_time(TIME1, 0)).unwrap();
+    write_file(dir.child("file1"), "contents1", TIME1);
     std::fs::write(
         dir.child(ARCHIVE_METADATA_JSON),
         r#"{"expected":[
@@ -447,9 +440,7 @@ fn test_metadata_json_file_backups() {
         predicates::str::diff("")
     );
 
-    let file1 = dir.child("file1");
-    std::fs::write(&file1, "contents1").unwrap();
-    filetime::set_file_mtime(&file1, FileTime::from_unix_time(TIME1, 0)).unwrap();
+    write_file(dir.child("file1"), "contents1", TIME1);
     for _ in [0, 1] {
         std::thread::sleep(Duration::from_secs(1));
         Command::cargo_bin(BIN_NAME)
