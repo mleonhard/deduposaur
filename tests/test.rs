@@ -7,7 +7,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 use temp_dir::TempDir;
 
-pub const ARCHIVE_METADATA_JSON: &'static str = "deduposaur.archive_metadata.json";
+const ARCHIVE_METADATA_JSON: &'static str = "deduposaur.archive_metadata.json";
+const PROCESS_METADATA_JSON: &'static str = "deduposaur.process_metadata.json";
 const BIN_NAME: &'static str = "deduposaur";
 /// 2011-11-11T19:11:11Z 2011-11-11T11:11:11-08:00
 const TIME1: i64 = 1321038671;
@@ -475,4 +476,49 @@ fn test_metadata_json_file_backups() {
             predicates::str::diff(r#"{"expected":[],"deleted":[]}"#)
         );
     }
+}
+
+#[test]
+fn test_renames_dupe() {
+    let archive = TempDir::new().unwrap();
+    let archive_sub1 = archive.path().join("sub1");
+    std::fs::create_dir(&archive_sub1).unwrap();
+    let archive_sub1_file1 = write_file(archive_sub1.join("file1"), "contents1", TIME1);
+    std::fs::write(archive.child(ARCHIVE_METADATA_JSON), "").unwrap();
+    let process = TempDir::new().unwrap();
+    let process_sub2 = process.path().join("sub2");
+    std::fs::create_dir(&process_sub2).unwrap();
+    let process_sub2_file1 = write_file(process_sub2.join("file1"), "contents1", TIME1);
+    Command::cargo_bin(BIN_NAME)
+        .unwrap()
+        .arg(format!("--archive={}", archive.path().to_string_lossy()))
+        .arg(format!("--process={}", process.path().to_string_lossy()))
+        .assert()
+        .success()
+        .stdout(predicates::str::diff(format!(
+            "Verified {}\nRenamed sub2/DUPE.file1 - {}/sub1/file1\n",
+            archive.path().to_string_lossy(),
+            archive.path().to_string_lossy(),
+        )));
+    let check = || {
+        assert!(archive_sub1_file1.exists());
+        assert!(!process_sub2_file1.exists());
+        assert!(process_sub2.join("DUPE.file1").exists());
+        assert_that!(
+            &std::fs::read_to_string(archive.child(PROCESS_METADATA_JSON)).unwrap(),
+            predicates::str::diff(r#"[]"#)
+        );
+    };
+    check();
+    Command::cargo_bin(BIN_NAME)
+        .unwrap()
+        .arg(format!("--archive={}", archive.path().to_string_lossy()))
+        .arg(format!("--process={}", process.path().to_string_lossy()))
+        .assert()
+        .success()
+        .stdout(predicates::str::diff(format!(
+            "Verified {}\n",
+            archive.path().to_string_lossy()
+        )));
+    check();
 }

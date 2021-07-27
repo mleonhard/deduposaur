@@ -460,6 +460,17 @@ fn files_identical(path1: impl AsRef<Path>, path2: impl AsRef<Path>) -> Result<b
     Ok(read_file(path1.as_ref())? == read_file(path2.as_ref())?)
 }
 
+fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<(), String> {
+    std::fs::rename(from.as_ref(), to.as_ref()).map_err(|e| {
+        format!(
+            "error renaming {:?} -> {:?}: {}",
+            from.as_ref().to_string_lossy(),
+            to.as_ref().to_string_lossy(),
+            e
+        )
+    })
+}
+
 fn write_archive_metadata(
     archive_metadata_path: &PathBuf,
     archive_metadata: &ArchiveMetadata,
@@ -489,22 +500,61 @@ fn write_archive_metadata(
         ));
         PathBuf::from(s)
     };
-    std::fs::rename(&archive_metadata_path, &backup_archive_metadata_path).map_err(|e| {
-        format!(
-            "error renaming {:?} -> {:?}: {}",
-            archive_metadata_path.to_string_lossy(),
-            backup_archive_metadata_path.to_string_lossy(),
-            e
-        )
-    })?;
-    std::fs::rename(&temp_archive_metadata_path, &archive_metadata_path).map_err(|e| {
-        format!(
-            "error renaming {:?} -> {:?}: {}",
-            temp_archive_metadata_path.to_string_lossy(),
-            archive_metadata_path.to_string_lossy(),
-            e
-        )
-    })
+    rename(&archive_metadata_path, &backup_archive_metadata_path)?;
+    rename(&temp_archive_metadata_path, &archive_metadata_path)
+}
+
+fn rename_with_prefix(
+    dir: &Path,
+    path: &str,
+    suffix: &'static str,
+    remark: Option<&str>,
+) -> Result<(), String> {
+    let path_buf = PathBuf::from(&path);
+    let new_name = suffix.to_string() + &path_buf.file_name().unwrap().to_string_lossy();
+    let new_path = if let Some(parent) = path_buf.parent() {
+        parent.join(&new_name)
+    } else {
+        PathBuf::from(&new_name)
+    };
+    rename(dir.join(path), dir.join(&new_path))?;
+    if let Some(remark) = remark {
+        println!("Renamed {} - {}", new_path.to_string_lossy(), remark);
+    } else {
+        println!("Renamed {}", new_path.to_string_lossy());
+    }
+    Ok(())
+}
+
+fn process_files(
+    archive_metadata: &ArchiveMetadata,
+    archive_dir: &Path,
+    process_dir: &Path,
+) -> Result<(), String> {
+    let mut records: Vec<FileRecord> = Vec::new();
+    walk_dir(process_dir.as_ref(), &mut records)?;
+    // Rename dupes.
+    let existing_paths: HashMap<(i64, FileDigest), String> =
+        HashMap::from_iter(archive_metadata.expected.iter().map(|record_cell| {
+            (
+                (
+                    record_cell.borrow().mtime,
+                    record_cell.borrow().digest.clone(),
+                ),
+                record_cell.borrow().path.clone(),
+            )
+        }));
+    for record in &mut records {
+        if let Some(existing_path) = existing_paths.get(&(record.mtime, record.digest.clone())) {
+            rename_with_prefix(
+                process_dir,
+                &record.path,
+                "DUPE.",
+                Some(&archive_dir.join(existing_path).to_string_lossy()),
+            )?;
+        }
+    }
+    Ok(())
 }
 
 fn main() -> Result<(), Box<String>> {
@@ -524,6 +574,8 @@ fn main() -> Result<(), Box<String>> {
         println!("Verified {}", opt.archive.to_string_lossy());
     }
     write_archive_metadata(&archive_metadata_path, &archive_metadata)?;
-    // TODO(mleonhard) Process files.
+    if let Some(process_dir) = opt.process {
+        process_files(&archive_metadata, &opt.archive, &process_dir)?;
+    }
     Ok(())
 }
