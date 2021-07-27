@@ -2,15 +2,29 @@ use assert_cmd::Command;
 use assert_that::assert_that;
 use filetime::FileTime;
 use predicates::boolean::PredicateBooleanExt;
+use std::convert::TryInto;
+use std::path::Path;
+use std::time::UNIX_EPOCH;
 use temp_dir::TempDir;
 
 pub const ARCHIVE_METADATA_JSON: &'static str = "deduposaur.archive_metadata.json";
 const BIN_NAME: &'static str = "deduposaur";
-/// 2011-11-11T19:11:11Z 2011-11-11T11:11:11-0700
+/// 2011-11-11T19:11:11Z 2011-11-11T11:11:11-08:00
 const TIME1: i64 = 1321038671;
-/// 2021-07-01T19:00:00Z 2020-07-01T12:00:00-0700
+/// 2021-07-01T19:00:00Z 2021-07-01T12:00:00-07:00
 const TIME2: i64 = 1625166000;
 
+fn get_mtime(p: impl AsRef<Path>) -> i64 {
+    std::fs::metadata(p.as_ref())
+        .unwrap()
+        .modified()
+        .unwrap()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+        .try_into()
+        .unwrap()
+}
 #[test]
 fn no_args() {
     Command::cargo_bin(BIN_NAME)
@@ -131,7 +145,7 @@ fn test_verify() {
 }
 
 #[test]
-fn test_changed() {
+fn test_contents_changed() {
     let dir = TempDir::new().unwrap();
     let file1 = dir.child("file1");
     std::fs::write(&file1, "contents2").unwrap();
@@ -149,9 +163,9 @@ fn test_changed() {
         .write_stdin("n") // <------------
         .assert()
         .success()
-        .stdout(predicates::str::diff(format!(
-            "WARNING file1 is changed\nAccept change? (y/n) \n"
-        )));
+        .stdout(predicates::str::diff(
+            "WARNING file1 is changed\nAccept change? (y/n) \n",
+        ));
     Command::cargo_bin(BIN_NAME)
         .unwrap()
         .arg(format!("--archive={}", dir.path().to_string_lossy()))
@@ -159,7 +173,8 @@ fn test_changed() {
         .assert()
         .success()
         .stdout(predicates::str::diff(format!(
-            "WARNING file1 is changed\nAccept change? (y/n) \n"
+            "WARNING file1 is changed\nAccept change? (y/n) \nVerified {}\n",
+            dir.path().to_string_lossy()
         )));
     Command::cargo_bin(BIN_NAME)
         .unwrap()
@@ -175,6 +190,102 @@ fn test_changed() {
         predicates::str::contains(
             "869ed4d9645d8f65f6650ff3e987e335183c02ebed99deccea2917c6fd7be006"
         )
+    );
+}
+
+#[test]
+fn test_accept_mtime_change() {
+    let dir = TempDir::new().unwrap();
+    let file1 = dir.child("file1");
+    std::fs::write(&file1, "contents1").unwrap();
+    filetime::set_file_mtime(&file1, FileTime::from_unix_time(TIME2, 0)).unwrap();
+    std::fs::write(
+        dir.child(ARCHIVE_METADATA_JSON),
+        r#"{"expected":[
+        {"path":"file1","mtime":1321038671,"digest":"809da78733fb34d7548ff1a8abe962ec865f8db07820e00f7a61ba79e2b6ff9f"}
+        ],"deleted":[]}"#,
+    )
+        .unwrap();
+    Command::cargo_bin(BIN_NAME)
+        .unwrap()
+        .arg(format!("--archive={}", dir.path().to_string_lossy()))
+        .write_stdin("n") // <------------
+        .assert()
+        .success()
+        .stdout(predicates::str::diff(
+            "WARNING file1 mtime changed 2011-11-11T11:11:11-08:00 -> 2021-07-01T12:00:00-07:00\nAccept (y/n) or revert (r)? \n"
+        ));
+    Command::cargo_bin(BIN_NAME)
+        .unwrap()
+        .arg(format!("--archive={}", dir.path().to_string_lossy()))
+        .write_stdin("y") // <------------
+        .assert()
+        .success()
+        .stdout(predicates::str::diff(format!(
+            "WARNING file1 mtime changed 2011-11-11T11:11:11-08:00 -> 2021-07-01T12:00:00-07:00\nAccept (y/n) or revert (r)? \nVerified {}\n",
+            dir.path().to_string_lossy()
+        )));
+    Command::cargo_bin(BIN_NAME)
+        .unwrap()
+        .arg(format!("--archive={}", dir.path().to_string_lossy()))
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(format!(
+            "Verified {}",
+            dir.path().to_string_lossy()
+        )));
+    assert_eq!(get_mtime(&file1), TIME2);
+    assert_that!(
+        &std::fs::read_to_string(dir.child(ARCHIVE_METADATA_JSON)).unwrap(),
+        predicates::str::contains(TIME2.to_string())
+    );
+}
+
+#[test]
+fn test_revert_mtime_change() {
+    let dir = TempDir::new().unwrap();
+    let file1 = dir.child("file1");
+    std::fs::write(&file1, "contents1").unwrap();
+    filetime::set_file_mtime(&file1, FileTime::from_unix_time(TIME2, 0)).unwrap();
+    std::fs::write(
+        dir.child(ARCHIVE_METADATA_JSON),
+        r#"{"expected":[
+        {"path":"file1","mtime":1321038671,"digest":"809da78733fb34d7548ff1a8abe962ec865f8db07820e00f7a61ba79e2b6ff9f"}
+        ],"deleted":[]}"#,
+    )
+        .unwrap();
+    Command::cargo_bin(BIN_NAME)
+        .unwrap()
+        .arg(format!("--archive={}", dir.path().to_string_lossy()))
+        .write_stdin("n") // <------------
+        .assert()
+        .success()
+        .stdout(predicates::str::diff(
+            "WARNING file1 mtime changed 2011-11-11T11:11:11-08:00 -> 2021-07-01T12:00:00-07:00\nAccept (y/n) or revert (r)? \n"
+        ));
+    Command::cargo_bin(BIN_NAME)
+        .unwrap()
+        .arg(format!("--archive={}", dir.path().to_string_lossy()))
+        .write_stdin("r") // <------------
+        .assert()
+        .success()
+        .stdout(predicates::str::diff(format!(
+            "WARNING file1 mtime changed 2011-11-11T11:11:11-08:00 -> 2021-07-01T12:00:00-07:00\nAccept (y/n) or revert (r)? \nVerified {}\n",
+            dir.path().to_string_lossy()
+        )));
+    Command::cargo_bin(BIN_NAME)
+        .unwrap()
+        .arg(format!("--archive={}", dir.path().to_string_lossy()))
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(format!(
+            "Verified {}",
+            dir.path().to_string_lossy()
+        )));
+    assert_eq!(get_mtime(&file1), TIME1);
+    assert_that!(
+        &std::fs::read_to_string(dir.child(ARCHIVE_METADATA_JSON)).unwrap(),
+        predicates::str::contains(TIME1.to_string())
     );
 }
 

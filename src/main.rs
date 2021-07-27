@@ -128,14 +128,15 @@
 //!    - `serde_json`
 //!    - `sha2`
 //! - Check json file backups for corruption.  Automatically accept them.
+use chrono::TimeZone;
+use filetime::FileTime;
 use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use sha2::Digest;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
-use std::io::Read;
-use std::io::Write;
+use std::io::{stderr, Read, Write};
 use std::iter::FromIterator;
 use std::os::macos::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -266,6 +267,51 @@ fn walk_dir(path: &Path, records: &mut Vec<FileRecord>) -> Result<(), String> {
     Ok(())
 }
 
+pub fn read_byte_from_stdin() -> Result<u8, String> {
+    std::io::stdin()
+        .bytes()
+        .next()
+        .ok_or_else(|| "stdin closed".to_string())?
+        .map_err(|e| format!("error reading stdin: {}", e))
+}
+
+#[derive(PartialEq)]
+enum PromptResponse {
+    Yes,
+    No,
+}
+impl PromptResponse {
+    pub fn prompt_and_read() -> Result<PromptResponse, String> {
+        loop {
+            println!("Accept change? (y/n) ");
+            match read_byte_from_stdin()? {
+                b'y' => return Ok(PromptResponse::Yes),
+                b'n' => return Ok(PromptResponse::No),
+                _ => {}
+            }
+        }
+    }
+}
+
+enum PromptWithRevertResponse {
+    Yes,
+    No,
+    Revert,
+}
+impl PromptWithRevertResponse {
+    pub fn prompt_and_read() -> Result<PromptWithRevertResponse, String> {
+        loop {
+            println!("Accept (y/n) or revert (r)? ");
+            match read_byte_from_stdin()? {
+                b'y' => return Ok(PromptWithRevertResponse::Yes),
+                b'n' => return Ok(PromptWithRevertResponse::No),
+                b'r' => return Ok(PromptWithRevertResponse::Revert),
+                _ => {}
+            }
+        }
+    }
+}
+
 fn main() -> Result<(), Box<String>> {
     let opt: Opt = Opt::from_args();
     if opt.archive.as_path().as_os_str().is_empty() {
@@ -281,54 +327,82 @@ fn main() -> Result<(), Box<String>> {
     let archive_metadata: ArchiveMetadata = read_json_file(&archive_metadata_path)?;
     let mut actual_records: Vec<FileRecord> = Vec::new();
     walk_dir(&opt.archive, &mut actual_records)?;
-    let expected_path_mtime_to_record: HashMap<(String, i64), &RefCell<FileRecord>> =
-        HashMap::from_iter(
-            archive_metadata
-                .expected
-                .iter()
-                .map(|cell| ((cell.borrow().path.clone(), cell.borrow().mtime), cell)),
-        );
-    writeln!(
-        std::io::stderr(),
-        "expected_path_mtime_to_record {:?}",
-        expected_path_mtime_to_record
-    )
-    .unwrap();
-    writeln!(std::io::stderr(), "actual_records {:?}", actual_records).unwrap();
-    for actual_record in &actual_records {
-        if let Some(expected_record_cell) =
-            expected_path_mtime_to_record.get(&(actual_record.path.clone(), actual_record.mtime))
-        {
-            let mut expected_record = expected_record_cell.borrow_mut();
-            writeln!(
-                std::io::stderr(),
-                "expected_digest {:?}",
-                expected_record.digest
-            )
-            .unwrap();
-            writeln!(
-                std::io::stderr(),
-                "actual_record.digest {:?}",
-                actual_record.digest
-            )
-            .unwrap();
-            if expected_record.digest != actual_record.digest {
-                all_ok = false;
-                println!("WARNING {} is changed", actual_record.path);
-                loop {
-                    println!("Accept change? (y/n) ");
-                    match std::io::stdin()
-                        .bytes()
-                        .next()
-                        .ok_or_else(|| "stdin closed".to_string())?
-                        .unwrap()
-                    {
-                        b'y' => {
-                            expected_record.digest.0 = actual_record.digest.0;
-                            break;
+    //writeln!(stderr(), "actual_records {:?}", actual_records).unwrap();
+    // Check for changed files.
+    {
+        let expected_path_mtime_to_record: HashMap<(String, i64), &RefCell<FileRecord>> =
+            HashMap::from_iter(
+                archive_metadata
+                    .expected
+                    .iter()
+                    .map(|cell| ((cell.borrow().path.clone(), cell.borrow().mtime), cell)),
+            );
+        for actual in &actual_records {
+            if let Some(expected_cell) =
+                expected_path_mtime_to_record.get(&(actual.path.clone(), actual.mtime))
+            {
+                let mut expected = expected_cell.borrow_mut();
+                if expected.digest != actual.digest {
+                    println!("WARNING {} is changed", actual.path);
+                    if PromptResponse::prompt_and_read()? == PromptResponse::Yes {
+                        expected.digest.0 = actual.digest.0;
+                    } else {
+                        all_ok = false;
+                    }
+                }
+            }
+        }
+    }
+    // Check for changed mtimes.
+    {
+        let expected_path_digest_to_record: HashMap<(String, FileDigest), &RefCell<FileRecord>> =
+            HashMap::from_iter(archive_metadata.expected.iter().map(|cell| {
+                (
+                    (cell.borrow().path.clone(), cell.borrow().digest.clone()),
+                    cell,
+                )
+            }));
+        writeln!(
+            stderr(),
+            "expected_path_digest_to_record {:?}",
+            expected_path_digest_to_record
+        )
+        .unwrap();
+        for actual in &actual_records {
+            if let Some(expected_cell) =
+                expected_path_digest_to_record.get(&(actual.path.clone(), actual.digest.clone()))
+            {
+                let mut expected = expected_cell.borrow_mut();
+                writeln!(
+                    stderr(),
+                    "{:?} expected={:?} actual={:?}",
+                    actual.path,
+                    expected.mtime,
+                    actual.mtime
+                )
+                .unwrap();
+                if expected.mtime != actual.mtime {
+                    println!(
+                        "WARNING {} mtime changed {} -> {}",
+                        actual.path,
+                        chrono::Local.timestamp(expected.mtime, 0).to_rfc3339(),
+                        chrono::Local.timestamp(actual.mtime, 0).to_rfc3339(),
+                    );
+                    match PromptWithRevertResponse::prompt_and_read()? {
+                        PromptWithRevertResponse::Yes => {
+                            expected.mtime = actual.mtime;
                         }
-                        b'n' => break,
-                        _ => {}
+                        PromptWithRevertResponse::No => {
+                            all_ok = false;
+                        }
+                        PromptWithRevertResponse::Revert => {
+                            let path = opt.archive.join(&actual.path);
+                            filetime::set_file_mtime(
+                                &path,
+                                FileTime::from_unix_time(expected.mtime, 0),
+                            )
+                            .map_err(|e| format!("error setting {:?} mtime: {}", path, e))?
+                        }
                     }
                 }
             }
@@ -336,11 +410,10 @@ fn main() -> Result<(), Box<String>> {
     }
     // TODO(mleonhard) Warn about deleted files.
     // TODO(mleonhard) Warn about renamed files.
-    // TODO(mleonhard) Warn about files with changed mtime.
     // TODO(mleonhard) Add new files.
     // TODO(mleonhard) Write new archive_metadata file.
     if all_ok {
-        println!("Verified {}", archive_metadata_path.to_string_lossy());
+        println!("Verified {}", opt.archive.to_string_lossy());
     }
     let temp_archive_metadata_path = {
         let mut s = archive_metadata_path.clone().into_os_string();
