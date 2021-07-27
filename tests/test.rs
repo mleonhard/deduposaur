@@ -121,11 +121,14 @@ fn empty_archive_metadata_json() {
 }
 
 #[test]
-fn test_verify() {
+fn test_new_file() {
     let dir = TempDir::new().unwrap();
     let file1 = dir.child("file1");
     std::fs::write(&file1, "contents1").unwrap();
     filetime::set_file_mtime(&file1, FileTime::from_unix_time(TIME1, 0)).unwrap();
+    let file2 = dir.child("file2");
+    std::fs::write(&file2, "contents2").unwrap();
+    filetime::set_file_mtime(&file2, FileTime::from_unix_time(TIME2, 0)).unwrap();
     std::fs::write(
         dir.child(ARCHIVE_METADATA_JSON),
         r#"{"expected":[
@@ -142,6 +145,12 @@ fn test_verify() {
             "Verified {}",
             dir.path().to_string_lossy()
         )));
+    assert_that!(
+        &std::fs::read_to_string(dir.child(ARCHIVE_METADATA_JSON)).unwrap(),
+        predicates::str::diff(
+            r#"{"expected":[{"path":"file1","mtime":1321038671,"digest":"809da78733fb34d7548ff1a8abe962ec865f8db07820e00f7a61ba79e2b6ff9f"},{"path":"file2","mtime":1625166000,"digest":"869ed4d9645d8f65f6650ff3e987e335183c02ebed99deccea2917c6fd7be006"}],"deleted":[]}"#
+        )
+    );
 }
 
 #[test]

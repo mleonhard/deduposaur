@@ -239,7 +239,11 @@ fn walk_dir(path: &Path, records: &mut Vec<FileRecord>) -> Result<(), String> {
         {
             let entry = entry_result
                 .map_err(|e| format!("error reading dir {}: {}", dir.to_string_lossy(), e))?;
-            if entry.path().starts_with(ARCHIVE_METADATA_JSON) {
+            if entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with(ARCHIVE_METADATA_JSON)
+            {
                 continue;
             }
             let metadata = entry
@@ -422,8 +426,14 @@ fn main() -> Result<(), Box<String>> {
             all_ok = false;
         }
     }
-    // TODO(mleonhard) Add new files.
-    // TODO(mleonhard) Write new archive_metadata file.
+    // All remaining unprocessed actual files must be new.
+    for actual in actual_records.iter_mut().filter(|elem| !elem.processed) {
+        actual.processed = true;
+        archive_metadata.expected.push(RefCell::new(actual.clone()));
+        archive_metadata.deleted.retain(|elem| {
+            (elem.mtime, &elem.path, &elem.digest) != (actual.mtime, &actual.path, &actual.digest)
+        });
+    }
     if all_ok {
         println!("Verified {}", opt.archive.to_string_lossy());
     }
