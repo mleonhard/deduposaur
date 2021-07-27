@@ -136,7 +136,7 @@ use sha2::Digest;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::fmt::{Debug, Formatter};
-use std::io::Read;
+use std::io::{ErrorKind, Read};
 use std::iter::FromIterator;
 use std::os::macos::fs::MetadataExt;
 use std::path::{Path, PathBuf};
@@ -448,6 +448,18 @@ fn check_for_new_files(
     }
 }
 
+fn read_file(path: impl AsRef<Path>) -> Result<Option<Vec<u8>>, String> {
+    match std::fs::read(path.as_ref()) {
+        Ok(contents) => Ok(Some(contents)),
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(format!("error reading {:?}: {}", path.as_ref(), e)),
+    }
+}
+
+fn files_identical(path1: impl AsRef<Path>, path2: impl AsRef<Path>) -> Result<bool, String> {
+    Ok(read_file(path1.as_ref())? == read_file(path2.as_ref())?)
+}
+
 fn write_archive_metadata(
     archive_metadata_path: &PathBuf,
     archive_metadata: &ArchiveMetadata,
@@ -458,7 +470,17 @@ fn write_archive_metadata(
         PathBuf::from(s)
     };
     write_json_file(&archive_metadata, &temp_archive_metadata_path).unwrap();
-    // TODO(mleonhard) Skip replacing file if they are identical.
+    if files_identical(&archive_metadata_path, &temp_archive_metadata_path)? {
+        // Skip making a backup and replacing file.
+        std::fs::remove_file(&temp_archive_metadata_path).map_err(|e| {
+            format!(
+                "error removing {:?}: {}",
+                temp_archive_metadata_path.to_string_lossy(),
+                e
+            )
+        })?;
+        return Ok(());
+    }
     let backup_archive_metadata_path = {
         let mut s = archive_metadata_path.clone().into_os_string();
         s.push(format!(

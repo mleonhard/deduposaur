@@ -4,7 +4,7 @@ use filetime::FileTime;
 use predicates::boolean::PredicateBooleanExt;
 use std::convert::TryInto;
 use std::path::Path;
-use std::time::UNIX_EPOCH;
+use std::time::{Duration, UNIX_EPOCH};
 use temp_dir::TempDir;
 
 pub const ARCHIVE_METADATA_JSON: &'static str = "deduposaur.archive_metadata.json";
@@ -399,4 +399,89 @@ fn test_deleted() {
         )));
 }
 
-// TODO(mleonhard) Test json file backups.
+fn list_metadata_backups(dir: impl AsRef<Path>) -> Vec<String> {
+    dir.as_ref()
+        .read_dir()
+        .map_err(|e| {
+            format!(
+                "error reading dir {}: {}",
+                dir.as_ref().to_string_lossy(),
+                e
+            )
+        })
+        .unwrap()
+        .map(|result| {
+            result
+                .map_err(|e| format!("error reading dir entry: {}", e))
+                .unwrap()
+        })
+        .map(|entry| entry.file_name().to_string_lossy().to_string())
+        .filter(|filename| filename.starts_with(ARCHIVE_METADATA_JSON))
+        .filter(|filename| filename != ARCHIVE_METADATA_JSON)
+        .collect()
+}
+
+#[test]
+fn test_metadata_json_file_backups() {
+    let dir = TempDir::new().unwrap();
+    std::fs::write(dir.child(ARCHIVE_METADATA_JSON), b"").unwrap();
+    assert!(list_metadata_backups(dir.path()).is_empty());
+    Command::cargo_bin(BIN_NAME)
+        .unwrap()
+        .arg(format!("--archive={}", dir.path().to_string_lossy()))
+        .assert()
+        .success()
+        .stdout(predicates::str::contains(format!(
+            "Verified {}",
+            dir.path().to_string_lossy()
+        )));
+    assert_that!(
+        &std::fs::read_to_string(dir.child(ARCHIVE_METADATA_JSON)).unwrap(),
+        predicates::str::diff(r#"{"expected":[],"deleted":[]}"#)
+    );
+    let metadata_backups = list_metadata_backups(dir.path());
+    assert_eq!(1, metadata_backups.len());
+    let first_backup = metadata_backups.first().unwrap();
+    assert_that!(
+        &std::fs::read_to_string(dir.child(first_backup)).unwrap(),
+        predicates::str::diff("")
+    );
+
+    let file1 = dir.child("file1");
+    std::fs::write(&file1, "contents1").unwrap();
+    filetime::set_file_mtime(&file1, FileTime::from_unix_time(TIME1, 0)).unwrap();
+    for _ in [0, 1] {
+        std::thread::sleep(Duration::from_secs(1));
+        Command::cargo_bin(BIN_NAME)
+            .unwrap()
+            .arg(format!("--archive={}", dir.path().to_string_lossy()))
+            .assert()
+            .success()
+            .stdout(predicates::str::contains(format!(
+                "Verified {}",
+                dir.path().to_string_lossy()
+            )));
+        assert_that!(
+            &std::fs::read_to_string(dir.child(ARCHIVE_METADATA_JSON)).unwrap(),
+            predicates::str::diff(
+                r#"{"expected":[{"path":"file1","mtime":1321038671,"digest":"809da78733fb34d7548ff1a8abe962ec865f8db07820e00f7a61ba79e2b6ff9f"}],"deleted":[]}"#
+            )
+        );
+        let metadata_backups = list_metadata_backups(dir.path());
+        println!("metadata_backups {:?}", metadata_backups);
+        assert_eq!(2, metadata_backups.len());
+        let second_backup = metadata_backups
+            .iter()
+            .filter(|filename| filename != &first_backup)
+            .next()
+            .unwrap();
+        assert_that!(
+            &std::fs::read_to_string(dir.child(first_backup)).unwrap(),
+            predicates::str::diff("")
+        );
+        assert_that!(
+            &std::fs::read_to_string(dir.child(second_backup)).unwrap(),
+            predicates::str::diff(r#"{"expected":[],"deleted":[]}"#)
+        );
+    }
+}
