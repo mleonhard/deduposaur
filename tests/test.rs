@@ -504,10 +504,7 @@ fn test_renames_dupe() {
         assert!(archive_sub1_file1.exists());
         assert!(!process_sub2_file1.exists());
         assert!(process_sub2.join("DUPE.file1").exists());
-        assert_that!(
-            &std::fs::read_to_string(process.child(PROCESS_METADATA_JSON)).unwrap(),
-            predicates::str::diff(r#"[]"#)
-        );
+        assert!(!process.child(PROCESS_METADATA_JSON).exists());
     };
     check();
     Command::cargo_bin(BIN_NAME)
@@ -569,10 +566,7 @@ fn test_renames_deleted() {
         assert!(process.child("DELETED.file2").exists());
         assert!(!process_sub2_file3.exists());
         assert!(process_sub2.join("DELETED.file3").exists());
-        assert_that!(
-            &std::fs::read_to_string(process.child(PROCESS_METADATA_JSON)).unwrap(),
-            predicates::str::diff(r#"[]"#)
-        );
+        assert!(!process.child(PROCESS_METADATA_JSON).exists());
     };
     check();
     Command::cargo_bin(BIN_NAME)
@@ -612,10 +606,7 @@ fn test_renames_changed() {
     let check = || {
         assert!(!process_sub1_file1.exists());
         assert!(process_sub1.join("CHANGED.file1").exists());
-        assert_that!(
-            &std::fs::read_to_string(process.child(PROCESS_METADATA_JSON)).unwrap(),
-            predicates::str::diff(r#"[]"#)
-        );
+        assert!(!process.child(PROCESS_METADATA_JSON).exists());
     };
     check();
     Command::cargo_bin(BIN_NAME)
@@ -655,10 +646,7 @@ fn test_renames_metadata_changed() {
     let check = || {
         assert!(!process_sub1_file1.exists());
         assert!(process_sub1.join("METADATA.file1").exists());
-        assert_that!(
-            &std::fs::read_to_string(process.child(PROCESS_METADATA_JSON)).unwrap(),
-            predicates::str::diff(r#"[]"#)
-        );
+        assert!(!process.child(PROCESS_METADATA_JSON).exists());
     };
     check();
     Command::cargo_bin(BIN_NAME)
@@ -674,5 +662,105 @@ fn test_renames_metadata_changed() {
     check();
 }
 
-// TODO(mleonhard) Delete a new file from the process dir and check that the program adds it to the archive metadata.
-// TODO(mleonhard) Test that program writes, cleans up, and deletes process metadata file.
+#[test]
+fn test_remembers_process_deleted() {
+    let archive = TempDir::new().unwrap();
+    std::fs::write(archive.child(ARCHIVE_METADATA_JSON), "").unwrap();
+    let process = TempDir::new().unwrap();
+    let process_sub1 = process.path().join("sub1");
+    std::fs::create_dir(&process_sub1).unwrap();
+    let process_sub1_file1 = write_file(process_sub1.join("file1"), "contents1", TIME1);
+    Command::cargo_bin(BIN_NAME)
+        .unwrap()
+        .arg(format!("--archive={}", archive.path().to_string_lossy()))
+        .arg(format!("--process={}", process.path().to_string_lossy()))
+        .assert()
+        .success()
+        .stdout(predicates::str::diff(format!(
+            "Verified {}\n",
+            archive.path().to_string_lossy()
+        )));
+
+    std::fs::remove_file(&process_sub1_file1).unwrap();
+    Command::cargo_bin(BIN_NAME)
+        .unwrap()
+        .arg(format!("--archive={}", archive.path().to_string_lossy()))
+        .arg(format!("--process={}", process.path().to_string_lossy()))
+        .assert()
+        .success()
+        .stdout(predicates::str::diff(format!(
+            "Verified {}\nsub1/file1 was deleted\n",
+            archive.path().to_string_lossy()
+        )));
+    let process_metadata_json = process.child(PROCESS_METADATA_JSON);
+    println!(
+        "{} {:?}",
+        PROCESS_METADATA_JSON,
+        std::fs::read_to_string(process.child(PROCESS_METADATA_JSON))
+            .or_else(|e| Ok::<String, ()>(format!("error: {}", e)))
+            .unwrap()
+    );
+    assert!(!process_metadata_json.exists());
+
+    let process2 = TempDir::new().unwrap();
+    let process2_file2 = write_file(process2.child("file2"), "contents1", TIME2);
+    Command::cargo_bin(BIN_NAME)
+        .unwrap()
+        .arg(format!("--archive={}", archive.path().to_string_lossy()))
+        .arg(format!("--process={}", process2.path().to_string_lossy()))
+        .assert()
+        .success()
+        .stdout(predicates::str::diff(format!(
+            "Verified {}\nRenamed DELETED.file2\n",
+            archive.path().to_string_lossy(),
+        )));
+    let process_deleted_file2 = process2.child("DELETED.file2");
+    assert!(!process2_file2.exists());
+    assert!(process_deleted_file2.exists());
+    assert!(!process_metadata_json.exists());
+
+    std::fs::remove_file(&process_deleted_file2).unwrap();
+    Command::cargo_bin(BIN_NAME)
+        .unwrap()
+        .arg(format!("--archive={}", archive.path().to_string_lossy()))
+        .arg(format!("--process={}", process2.path().to_string_lossy()))
+        .assert()
+        .success()
+        .stdout(predicates::str::diff(format!(
+            "Verified {}\n",
+            archive.path().to_string_lossy()
+        )));
+    assert!(!process_metadata_json.exists());
+}
+
+#[test]
+fn test_user_renames_process_file() {
+    let archive = TempDir::new().unwrap();
+    std::fs::write(archive.child(ARCHIVE_METADATA_JSON), "").unwrap();
+    let process = TempDir::new().unwrap();
+    let file1 = write_file(process.child("file1"), "contents1", TIME1);
+    Command::cargo_bin(BIN_NAME)
+        .unwrap()
+        .arg(format!("--archive={}", archive.path().to_string_lossy()))
+        .arg(format!("--process={}", process.path().to_string_lossy()))
+        .assert()
+        .success()
+        .stdout(predicates::str::diff(format!(
+            "Verified {}\n",
+            archive.path().to_string_lossy()
+        )));
+
+    let file1_renamed = process.child("file1_renamed");
+    std::fs::rename(&file1, &file1_renamed).unwrap();
+    // Program should not treat file as deleted.
+    Command::cargo_bin(BIN_NAME)
+        .unwrap()
+        .arg(format!("--archive={}", archive.path().to_string_lossy()))
+        .arg(format!("--process={}", process.path().to_string_lossy()))
+        .assert()
+        .success()
+        .stdout(predicates::str::diff(format!(
+            "Verified {}\n",
+            archive.path().to_string_lossy()
+        )));
+}

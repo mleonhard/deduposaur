@@ -163,9 +163,17 @@ struct Opt {
     process: Option<PathBuf>,
 }
 
-pub fn read_json_file<T: for<'a> Deserialize<'a> + Default>(path: &Path) -> Result<T, String> {
-    let reader = std::fs::File::open(path)
-        .map_err(|e| format!("error reading {}: {}", path.to_string_lossy(), e))?;
+pub fn read_json_file<T: for<'a> Deserialize<'a> + Default>(
+    path: &Path,
+    ignore_missing: bool,
+) -> Result<T, String> {
+    let reader = match std::fs::File::open(path) {
+        Ok(reader) => reader,
+        Err(e) if ignore_missing && e.kind() == ErrorKind::NotFound => {
+            return Ok(Default::default())
+        }
+        Err(e) => return Err(format!("error reading {}: {}", path.to_string_lossy(), e)),
+    };
     let metadata = reader
         .metadata()
         .map_err(|e| format!("error reading {}: {}", path.to_string_lossy(), e))?;
@@ -467,6 +475,14 @@ fn read_file(path: impl AsRef<Path>) -> Result<Option<Vec<u8>>, String> {
     }
 }
 
+fn remove_file_if_exists(path: impl AsRef<Path>) -> Result<(), String> {
+    match std::fs::remove_file(path.as_ref()) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(format!("error reading {:?}: {}", path.as_ref(), e)),
+    }
+}
+
 fn files_identical(path1: impl AsRef<Path>, path2: impl AsRef<Path>) -> Result<bool, String> {
     Ok(read_file(path1.as_ref())? == read_file(path2.as_ref())?)
 }
@@ -538,7 +554,7 @@ fn rename_with_prefix(
 }
 
 fn process_files(
-    archive_metadata: &ArchiveMetadata,
+    archive_metadata: &mut ArchiveMetadata,
     archive_dir: &Path,
     process_dir: &Path,
 ) -> Result<(), String> {
@@ -546,8 +562,29 @@ fn process_files(
     walk_dir(process_dir.as_ref(), &mut records)?;
     records.retain(|record| {
         let file_name = record.file_name();
-        !file_name.starts_with("DUPE.") && !file_name.starts_with("DELETED.")
+        file_name != PROCESS_METADATA_JSON
+            && !file_name.starts_with("DUPE.")
+            && !file_name.starts_with("DELETED.")
+            && !file_name.starts_with("CHANGED.")
+            && !file_name.starts_with("METADATA.")
     });
+    let process_metadata_json_path = process_dir.join(PROCESS_METADATA_JSON);
+    let mut new_files: Vec<FileRecord> = read_json_file(&process_metadata_json_path, true)?;
+    {
+        let process_digests: HashSet<FileDigest, RandomState> =
+            HashSet::from_iter(records.iter().map(|record| record.digest.clone()));
+        new_files.retain(|new_file| {
+            if process_digests.contains(&new_file.digest) {
+                // File still exists in process dir.
+                true
+            } else {
+                // File was deleted from process dir.
+                println!("{} was deleted", new_file.path);
+                archive_metadata.deleted.push(new_file.clone());
+                false
+            }
+        });
+    }
     let existing_paths: HashMap<(i64, FileDigest), String> =
         HashMap::from_iter(archive_metadata.expected.iter().map(|record_cell| {
             (
@@ -570,7 +607,7 @@ fn process_files(
             .iter()
             .map(|r| (r.borrow().path.clone(), r)),
     );
-    for record in &records {
+    for record in records {
         // Rename dupes.
         if let Some(existing_path) = existing_paths.get(&(record.mtime, record.digest.clone())) {
             rename_with_prefix(
@@ -579,28 +616,40 @@ fn process_files(
                 "DUPE.",
                 Some(&archive_dir.join(existing_path).to_string_lossy()),
             )?;
-        } else if deleted_digests.contains(&record.digest) {
-            // Rename previously deleted.
+            continue;
+        }
+        // Rename previously deleted.
+        if deleted_digests.contains(&record.digest) {
             rename_with_prefix(process_dir, &record.path, "DELETED.", None)?;
-        } else if let Some(expected_cell) = index.get(&record.path) {
+            continue;
+        }
+        if let Some(expected_cell) = index.get(&record.path) {
+            // Rename changed.
             if expected_cell.borrow().digest != record.digest {
-                // Rename changed.
                 rename_with_prefix(process_dir, &record.path, "CHANGED.", None)?;
-            } else if expected_cell.borrow().mtime != record.mtime {
-                // Rename metadata changed.
+                continue;
+            }
+            // Rename metadata changed.
+            if expected_cell.borrow().mtime != record.mtime {
                 rename_with_prefix(process_dir, &record.path, "METADATA.", None)?;
+                continue;
             }
         }
+        // Remember new files.
+        new_files.push(record);
     }
-    let new_files: Vec<FileRecord> = Vec::new();
-    write_json_file(&new_files, &process_dir.join(PROCESS_METADATA_JSON))?;
+    if new_files.is_empty() {
+        remove_file_if_exists(&process_metadata_json_path)?;
+    } else {
+        write_json_file(&new_files, &process_metadata_json_path)?;
+    }
     Ok(())
 }
 
 fn main() -> Result<(), Box<String>> {
     let opt = get_opt();
     let archive_metadata_path = opt.archive.join(ARCHIVE_METADATA_JSON);
-    let mut archive_metadata: ArchiveMetadata = read_json_file(&archive_metadata_path)?;
+    let mut archive_metadata: ArchiveMetadata = read_json_file(&archive_metadata_path, false)?;
     let mut actual_records: Vec<FileRecord> = Vec::new();
     walk_dir(&opt.archive, &mut actual_records)?;
     let all_ok = check_for_existing_and_changed_files(
@@ -613,9 +662,9 @@ fn main() -> Result<(), Box<String>> {
     if all_ok {
         println!("Verified {}", opt.archive.to_string_lossy());
     }
-    write_archive_metadata(&archive_metadata_path, &archive_metadata)?;
     if let Some(process_dir) = opt.process {
-        process_files(&archive_metadata, &opt.archive, &process_dir)?;
+        process_files(&mut archive_metadata, &opt.archive, &process_dir)?;
     }
+    write_archive_metadata(&archive_metadata_path, &archive_metadata)?;
     Ok(())
 }
