@@ -618,11 +618,6 @@ fn process_files(
             )?;
             continue;
         }
-        // Rename previously deleted.
-        if deleted_digests.contains(&record.digest) {
-            rename_with_prefix(process_dir, &record.path, "DELETED.", None)?;
-            continue;
-        }
         if let Some(expected_cell) = index.get(&record.path) {
             // Rename changed.
             if expected_cell.borrow().digest != record.digest {
@@ -634,6 +629,11 @@ fn process_files(
                 rename_with_prefix(process_dir, &record.path, "METADATA.", None)?;
                 continue;
             }
+        }
+        // Rename previously deleted.
+        if deleted_digests.contains(&record.digest) {
+            rename_with_prefix(process_dir, &record.path, "DELETED.", None)?;
+            continue;
         }
         // Remember new files.
         new_files.push(record);
