@@ -587,3 +587,49 @@ fn test_renames_deleted() {
         )));
     check();
 }
+
+#[test]
+fn test_renames_changed() {
+    let archive = TempDir::new().unwrap();
+    std::fs::write(archive.child(ARCHIVE_METADATA_JSON), "").unwrap();
+    let archive_sub1 = archive.path().join("sub1");
+    std::fs::create_dir(&archive_sub1).unwrap();
+    write_file(archive_sub1.join("file1"), "contents1", TIME1);
+    let process = TempDir::new().unwrap();
+    let process_sub1 = process.path().join("sub1");
+    std::fs::create_dir(&process_sub1).unwrap();
+    let process_sub1_file1 = write_file(process_sub1.join("file1"), "contents2", TIME2);
+    Command::cargo_bin(BIN_NAME)
+        .unwrap()
+        .arg(format!("--archive={}", archive.path().to_string_lossy()))
+        .arg(format!("--process={}", process.path().to_string_lossy()))
+        .assert()
+        .success()
+        .stdout(predicates::str::diff(format!(
+            "Verified {}\nRenamed sub1/CHANGED.file1\n",
+            archive.path().to_string_lossy(),
+        )));
+    let check = || {
+        assert!(!process_sub1_file1.exists());
+        assert!(process_sub1.join("CHANGED.file1").exists());
+        assert_that!(
+            &std::fs::read_to_string(process.child(PROCESS_METADATA_JSON)).unwrap(),
+            predicates::str::diff(r#"[]"#)
+        );
+    };
+    check();
+    Command::cargo_bin(BIN_NAME)
+        .unwrap()
+        .arg(format!("--archive={}", archive.path().to_string_lossy()))
+        .arg(format!("--process={}", process.path().to_string_lossy()))
+        .assert()
+        .success()
+        .stdout(predicates::str::diff(format!(
+            "Verified {}\n",
+            archive.path().to_string_lossy()
+        )));
+    check();
+}
+
+// TODO(mleonhard) Delete a new file from the process dir and check that the program adds it to the archive metadata.
+// TODO(mleonhard) Test that program writes, cleans up, and deletes process metadata file.

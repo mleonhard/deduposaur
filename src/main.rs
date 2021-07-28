@@ -569,16 +569,30 @@ fn process_files(
             )?;
         }
     }
-    // Check for deleted.
+    // Rename previously deleted.
     let deleted_digests: HashSet<FileDigest, RandomState> = HashSet::from_iter(
         archive_metadata
             .deleted
             .iter()
             .map(|record| record.digest.clone()),
     );
-    for record in records {
+    for record in &records {
         if deleted_digests.contains(&record.digest) {
             rename_with_prefix(process_dir, &record.path, "DELETED.", None)?;
+        }
+    }
+    // Rename changed.
+    let index: HashMap<String, &RefCell<FileRecord>> = HashMap::from_iter(
+        archive_metadata
+            .expected
+            .iter()
+            .map(|r| (r.borrow().path.clone(), r)),
+    );
+    for record in &mut records {
+        if let Some(expected_cell) = index.get(&record.path) {
+            if expected_cell.borrow().digest != record.digest {
+                rename_with_prefix(process_dir, &record.path, "CHANGED.", None)?;
+            }
         }
     }
     let new_files: Vec<FileRecord> = Vec::new();
