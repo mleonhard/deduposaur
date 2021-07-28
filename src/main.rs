@@ -548,7 +548,6 @@ fn process_files(
         let file_name = record.file_name();
         !file_name.starts_with("DUPE.") && !file_name.starts_with("DELETED.")
     });
-    // Rename dupes.
     let existing_paths: HashMap<(i64, FileDigest), String> =
         HashMap::from_iter(archive_metadata.expected.iter().map(|record_cell| {
             (
@@ -559,7 +558,20 @@ fn process_files(
                 record_cell.borrow().path.clone(),
             )
         }));
-    for record in &mut records {
+    let deleted_digests: HashSet<FileDigest, RandomState> = HashSet::from_iter(
+        archive_metadata
+            .deleted
+            .iter()
+            .map(|record| record.digest.clone()),
+    );
+    let index: HashMap<String, &RefCell<FileRecord>> = HashMap::from_iter(
+        archive_metadata
+            .expected
+            .iter()
+            .map(|r| (r.borrow().path.clone(), r)),
+    );
+    for record in &records {
+        // Rename dupes.
         if let Some(existing_path) = existing_paths.get(&(record.mtime, record.digest.clone())) {
             rename_with_prefix(
                 process_dir,
@@ -567,31 +579,16 @@ fn process_files(
                 "DUPE.",
                 Some(&archive_dir.join(existing_path).to_string_lossy()),
             )?;
-        }
-    }
-    // Rename previously deleted.
-    let deleted_digests: HashSet<FileDigest, RandomState> = HashSet::from_iter(
-        archive_metadata
-            .deleted
-            .iter()
-            .map(|record| record.digest.clone()),
-    );
-    for record in &records {
-        if deleted_digests.contains(&record.digest) {
+        } else if deleted_digests.contains(&record.digest) {
+            // Rename previously deleted.
             rename_with_prefix(process_dir, &record.path, "DELETED.", None)?;
-        }
-    }
-    // Rename changed.
-    let index: HashMap<String, &RefCell<FileRecord>> = HashMap::from_iter(
-        archive_metadata
-            .expected
-            .iter()
-            .map(|r| (r.borrow().path.clone(), r)),
-    );
-    for record in &mut records {
-        if let Some(expected_cell) = index.get(&record.path) {
+        } else if let Some(expected_cell) = index.get(&record.path) {
             if expected_cell.borrow().digest != record.digest {
+                // Rename changed.
                 rename_with_prefix(process_dir, &record.path, "CHANGED.", None)?;
+            } else if expected_cell.borrow().mtime != record.mtime {
+                // Rename metadata changed.
+                rename_with_prefix(process_dir, &record.path, "METADATA.", None)?;
             }
         }
     }
