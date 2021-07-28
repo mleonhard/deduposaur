@@ -134,7 +134,8 @@ use serde::{Deserialize, Serialize};
 use serde_with::serde_as;
 use sha2::Digest;
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::hash_map::RandomState;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::io::{ErrorKind, Read};
 use std::iter::FromIterator;
@@ -543,7 +544,10 @@ fn process_files(
 ) -> Result<(), String> {
     let mut records: Vec<FileRecord> = Vec::new();
     walk_dir(process_dir.as_ref(), &mut records)?;
-    records.retain(|record| !record.file_name().starts_with("DUPE."));
+    records.retain(|record| {
+        let file_name = record.file_name();
+        !file_name.starts_with("DUPE.") && !file_name.starts_with("DELETED.")
+    });
     // Rename dupes.
     let existing_paths: HashMap<(i64, FileDigest), String> =
         HashMap::from_iter(archive_metadata.expected.iter().map(|record_cell| {
@@ -563,6 +567,18 @@ fn process_files(
                 "DUPE.",
                 Some(&archive_dir.join(existing_path).to_string_lossy()),
             )?;
+        }
+    }
+    // Check for deleted.
+    let deleted_digests: HashSet<FileDigest, RandomState> = HashSet::from_iter(
+        archive_metadata
+            .deleted
+            .iter()
+            .map(|record| record.digest.clone()),
+    );
+    for record in records {
+        if deleted_digests.contains(&record.digest) {
+            rename_with_prefix(process_dir, &record.path, "DELETED.", None)?;
         }
     }
     let new_files: Vec<FileRecord> = Vec::new();

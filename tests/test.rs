@@ -522,3 +522,68 @@ fn test_renames_dupe() {
         )));
     check();
 }
+
+#[test]
+fn test_renames_deleted() {
+    let archive = TempDir::new().unwrap();
+    let archive_file1 = write_file(archive.child("file1"), "contents1", TIME1);
+    std::fs::write(archive.child(ARCHIVE_METADATA_JSON), "").unwrap();
+    Command::cargo_bin(BIN_NAME)
+        .unwrap()
+        .arg(format!("--archive={}", archive.path().to_string_lossy()))
+        .assert()
+        .success()
+        .stdout(predicates::str::diff(format!(
+            "Verified {}\n",
+            archive.path().to_string_lossy()
+        )));
+    std::fs::remove_file(&archive_file1).unwrap();
+    Command::cargo_bin(BIN_NAME)
+        .unwrap()
+        .arg(format!("--archive={}", archive.path().to_string_lossy()))
+        .write_stdin("y") // <------------
+        .assert()
+        .success()
+        .stdout(predicates::str::diff(format!(
+            "WARNING file1 is deleted\nAccept change? (y/n) \nVerified {}\n",
+            archive.path().to_string_lossy()
+        )));
+
+    let process = TempDir::new().unwrap();
+    let process_file2 = write_file(process.child("file2"), "contents1", TIME1);
+    let process_sub2 = process.path().join("sub2");
+    std::fs::create_dir(&process_sub2).unwrap();
+    let process_sub2_file3 = write_file(process_sub2.join("file3"), "contents1", TIME1);
+    Command::cargo_bin(BIN_NAME)
+        .unwrap()
+        .arg(format!("--archive={}", archive.path().to_string_lossy()))
+        .arg(format!("--process={}", process.path().to_string_lossy()))
+        .assert()
+        .success()
+        .stdout(predicates::str::diff(format!(
+            "Verified {}\nRenamed DELETED.file2\nRenamed sub2/DELETED.file3\n",
+            archive.path().to_string_lossy(),
+        )));
+    let check = || {
+        assert!(!process_file2.exists());
+        assert!(process.child("DELETED.file2").exists());
+        assert!(!process_sub2_file3.exists());
+        assert!(process_sub2.join("DELETED.file3").exists());
+        assert_that!(
+            &std::fs::read_to_string(process.child(PROCESS_METADATA_JSON)).unwrap(),
+            predicates::str::diff(r#"[]"#)
+        );
+    };
+    check();
+    Command::cargo_bin(BIN_NAME)
+        .unwrap()
+        .arg(format!("--archive={}", archive.path().to_string_lossy()))
+        .arg(format!("--process={}", process.path().to_string_lossy()))
+        .assert()
+        .success()
+        .stdout(predicates::str::diff(format!(
+            "Verified {}\n",
+            archive.path().to_string_lossy()
+        )));
+    check();
+}
