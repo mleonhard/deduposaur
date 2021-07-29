@@ -351,6 +351,18 @@ fn get_opt() -> Opt {
     opt
 }
 
+fn normalize(archive_metadata: &mut ArchiveMetadata) {
+    let expected_digests: HashSet<FileDigest, RandomState> = HashSet::from_iter(
+        archive_metadata
+            .expected
+            .iter()
+            .map(|record| record.borrow().digest.clone()),
+    );
+    archive_metadata
+        .deleted
+        .retain(|record| !expected_digests.contains(&record.digest));
+}
+
 fn check_for_existing_and_changed_files(
     expected_records: &Vec<RefCell<FileRecord>>,
     actual_records: &mut Vec<FileRecord>,
@@ -667,6 +679,7 @@ fn main() -> Result<(), Box<String>> {
     let opt = get_opt();
     let archive_metadata_path = opt.archive.join(ARCHIVE_METADATA_JSON);
     let mut archive_metadata: ArchiveMetadata = read_json_file(&archive_metadata_path, false)?;
+    normalize(&mut archive_metadata);
     let mut actual_records: Vec<FileRecord> = Vec::new();
     walk_dir(&opt.archive, &mut actual_records)?;
     let all_ok = check_for_existing_and_changed_files(
