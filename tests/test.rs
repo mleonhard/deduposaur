@@ -33,6 +33,16 @@ fn write_file(path: PathBuf, contents: impl AsRef<[u8]>, mtime: i64) -> PathBuf 
     path
 }
 
+fn print_file(path: &Path) {
+    println!(
+        "{}: {}",
+        path.to_string_lossy(),
+        std::fs::read_to_string(&path)
+            .or_else(|e| Ok::<String, ()>(format!("error: {}", e)))
+            .unwrap()
+    );
+}
+
 #[test]
 fn no_args() {
     Command::cargo_bin(BIN_NAME)
@@ -693,13 +703,7 @@ fn test_remembers_process_deleted() {
             archive.path().to_string_lossy()
         )));
     let process_metadata_json = process.child(PROCESS_METADATA_JSON);
-    println!(
-        "{} {:?}",
-        PROCESS_METADATA_JSON,
-        std::fs::read_to_string(process.child(PROCESS_METADATA_JSON))
-            .or_else(|e| Ok::<String, ()>(format!("error: {}", e)))
-            .unwrap()
-    );
+    print_file(&process_metadata_json);
     assert!(!process_metadata_json.exists());
 
     let process2 = TempDir::new().unwrap();
@@ -763,4 +767,56 @@ fn test_user_renames_process_file() {
             "Verified {}\n",
             archive.path().to_string_lossy()
         )));
+}
+
+#[test]
+fn test_user_moves_file_to_archive() {
+    let archive = TempDir::new().unwrap();
+    std::fs::write(archive.child(ARCHIVE_METADATA_JSON), "").unwrap();
+    let process = TempDir::new().unwrap();
+    let process_file1 = write_file(process.child("file1"), "contents1", TIME1);
+    Command::cargo_bin(BIN_NAME)
+        .unwrap()
+        .arg(format!("--archive={}", archive.path().to_string_lossy()))
+        .arg(format!("--process={}", process.path().to_string_lossy()))
+        .assert()
+        .success()
+        .stdout(predicates::str::diff(format!(
+            "Verified {}\n",
+            archive.path().to_string_lossy()
+        )));
+
+    let archive_file1 = archive.child("file1");
+    std::fs::rename(&process_file1, &archive_file1).unwrap();
+    Command::cargo_bin(BIN_NAME)
+        .unwrap()
+        .arg(format!("--archive={}", archive.path().to_string_lossy()))
+        .arg(format!("--process={}", process.path().to_string_lossy()))
+        .assert()
+        .success()
+        .stdout(predicates::str::diff(format!(
+            "Verified {}\n",
+            archive.path().to_string_lossy()
+        )));
+    let process_metadata_json = process.child(PROCESS_METADATA_JSON);
+    print_file(&process_metadata_json);
+    assert!(!process_metadata_json.exists());
+
+    let process_file2 = write_file(process.child("file2"), "contents1", TIME1);
+    // Program should treat file2 as a duplicate, not deleted.
+    Command::cargo_bin(BIN_NAME)
+        .unwrap()
+        .arg(format!("--archive={}", archive.path().to_string_lossy()))
+        .arg(format!("--process={}", process.path().to_string_lossy()))
+        .assert()
+        .success()
+        .stdout(predicates::str::diff(format!(
+            "Verified {}\nRenamed DUPE.file2 - {}/file1\n",
+            archive.path().to_string_lossy(),
+            archive.path().to_string_lossy(),
+        )));
+    assert!(!process_file2.exists());
+    assert!(process.child("DUPE.file2").exists());
+    print_file(&process_metadata_json);
+    assert!(!process_metadata_json.exists());
 }

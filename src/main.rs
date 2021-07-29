@@ -573,10 +573,19 @@ fn process_files(
     {
         let process_digests: HashSet<FileDigest, RandomState> =
             HashSet::from_iter(records.iter().map(|record| record.digest.clone()));
+        let expected_digests: HashSet<FileDigest, RandomState> = HashSet::from_iter(
+            archive_metadata
+                .expected
+                .iter()
+                .map(|record| record.borrow().digest.clone()),
+        );
         new_files.retain(|new_file| {
             if process_digests.contains(&new_file.digest) {
                 // File still exists in process dir.
                 true
+            } else if expected_digests.contains(&new_file.digest) {
+                // File was moved to archive dir.
+                false
             } else {
                 // File was deleted from process dir.
                 println!("{} was deleted", new_file.path);
@@ -601,11 +610,17 @@ fn process_files(
             .iter()
             .map(|record| record.digest.clone()),
     );
-    let index: HashMap<String, &RefCell<FileRecord>> = HashMap::from_iter(
+    let path_index: HashMap<String, &RefCell<FileRecord>> = HashMap::from_iter(
         archive_metadata
             .expected
             .iter()
             .map(|r| (r.borrow().path.clone(), r)),
+    );
+    let digest_index: HashMap<FileDigest, &RefCell<FileRecord>> = HashMap::from_iter(
+        archive_metadata
+            .expected
+            .iter()
+            .map(|r| (r.borrow().digest.clone(), r)),
     );
     for record in records {
         // Rename dupes.
@@ -618,19 +633,21 @@ fn process_files(
             )?;
             continue;
         }
-        if let Some(expected_cell) = index.get(&record.path) {
-            // Rename changed.
+        // Rename changed files.
+        if let Some(expected_cell) = path_index.get(&record.path) {
             if expected_cell.borrow().digest != record.digest {
                 rename_with_prefix(process_dir, &record.path, "CHANGED.", None)?;
                 continue;
             }
-            // Rename metadata changed.
+        }
+        // Rename files with mtime changed.
+        if let Some(expected_cell) = digest_index.get(&record.digest) {
             if expected_cell.borrow().mtime != record.mtime {
                 rename_with_prefix(process_dir, &record.path, "METADATA.", None)?;
                 continue;
             }
         }
-        // Rename previously deleted.
+        // Rename previously deleted files.
         if deleted_digests.contains(&record.digest) {
             rename_with_prefix(process_dir, &record.path, "DELETED.", None)?;
             continue;
