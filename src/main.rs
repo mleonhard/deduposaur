@@ -592,12 +592,12 @@ fn process_files(
                 .map(|record| record.borrow().digest.clone()),
         );
         new_files.retain(|new_file| {
-            if process_digests.contains(&new_file.digest) {
-                // File still exists in process dir.
-                true
-            } else if expected_digests.contains(&new_file.digest) {
+            if expected_digests.contains(&new_file.digest) {
                 // File was moved to archive dir.
                 false
+            } else if process_digests.contains(&new_file.digest) {
+                // File still exists in process dir.
+                true
             } else {
                 // File was deleted from process dir.
                 println!("{} was deleted", new_file.path);
