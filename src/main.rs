@@ -121,13 +121,13 @@
 //! ```
 //!
 //! # TO DO
-//! - Integration tests
-//! - Make tests pass.
+//! - Report duplicates in archive and process dir
+//! - DONE - Integration tests
+//! - DONE - Make tests pass.
 //! - Switch away from libraries with unsafe code:
 //!    - `structopt` (WTF does command-line processing need unsafe code for?)
 //!    - `serde_json`
 //!    - `sha2`
-//! - Check json file backups for corruption.  Automatically accept them.
 use chrono::TimeZone;
 use filetime::FileTime;
 use serde::{Deserialize, Serialize};
