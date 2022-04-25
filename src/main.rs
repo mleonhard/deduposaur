@@ -132,6 +132,7 @@
 //!    - `sha2`
 //!
 //! # Cargo Geiger Safety Report
+//! # License
 use chrono::TimeZone;
 use filetime::FileTime;
 use serde::{Deserialize, Serialize};
@@ -142,13 +143,12 @@ use std::collections::hash_map::RandomState;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Formatter};
 use std::io::{ErrorKind, Read};
-use std::iter::FromIterator;
 use std::os::macos::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use structopt::StructOpt;
 
-const ARCHIVE_METADATA_JSON: &'static str = "deduposaur.archive_metadata.json";
-const PROCESS_METADATA_JSON: &'static str = "deduposaur.process_metadata.json";
+const ARCHIVE_METADATA_JSON: &str = "deduposaur.archive_metadata.json";
+const PROCESS_METADATA_JSON: &str = "deduposaur.process_metadata.json";
 
 #[derive(Debug, StructOpt)]
 #[structopt(about)]
@@ -167,7 +167,7 @@ struct Opt {
     process: Option<PathBuf>,
 }
 
-pub fn read_json_file<T: for<'a> Deserialize<'a> + Default>(
+fn read_json_file<T: for<'a> Deserialize<'a> + Default>(
     path: &Path,
     ignore_missing: bool,
 ) -> Result<T, String> {
@@ -188,7 +188,7 @@ pub fn read_json_file<T: for<'a> Deserialize<'a> + Default>(
         .map_err(|e| format!("error reading {}: {}", path.to_string_lossy(), e))
 }
 
-pub fn write_json_file(value: &impl Serialize, path: &Path) -> Result<(), String> {
+fn write_json_file(value: &impl Serialize, path: &Path) -> Result<(), String> {
     let writer = std::fs::File::create(path)
         .map_err(|e| format!("error writing {}: {}", path.to_string_lossy(), e))?;
     serde_json::to_writer(writer, value)
@@ -213,7 +213,7 @@ pub struct FileRecord {
     processed: bool,
 }
 impl FileRecord {
-    pub fn file_name(&self) -> String {
+    fn file_name(&self) -> String {
         PathBuf::from(&self.path)
             .file_name()
             .unwrap()
@@ -222,18 +222,10 @@ impl FileRecord {
     }
 }
 
-#[derive(Debug, Deserialize, Serialize)]
+#[derive(Debug, Default, Deserialize, Serialize)]
 pub struct ArchiveMetadata {
     expected: Vec<RefCell<FileRecord>>,
     deleted: Vec<FileRecord>,
-}
-impl Default for ArchiveMetadata {
-    fn default() -> Self {
-        ArchiveMetadata {
-            expected: Vec::new(),
-            deleted: Vec::new(),
-        }
-    }
 }
 
 fn read_file_digest(path: &Path) -> Result<FileDigest, String> {
@@ -297,7 +289,7 @@ fn walk_dir(path: &Path, records: &mut Vec<FileRecord>) -> Result<(), String> {
     Ok(())
 }
 
-pub fn read_byte_from_stdin() -> Result<u8, String> {
+fn read_byte_from_stdin() -> Result<u8, String> {
     std::io::stdin()
         .bytes()
         .next()
@@ -311,7 +303,7 @@ enum PromptResponse {
     No,
 }
 impl PromptResponse {
-    pub fn prompt_and_read() -> Result<PromptResponse, String> {
+    fn prompt_and_read() -> Result<PromptResponse, String> {
         loop {
             println!("Accept change? (y/n) ");
             match read_byte_from_stdin()? {
@@ -329,7 +321,7 @@ enum PromptWithRevertResponse {
     Revert,
 }
 impl PromptWithRevertResponse {
-    pub fn prompt_and_read() -> Result<PromptWithRevertResponse, String> {
+    fn prompt_and_read() -> Result<PromptWithRevertResponse, String> {
         loop {
             println!("Accept (y/n) or revert (r)? ");
             match read_byte_from_stdin()? {
@@ -344,40 +336,40 @@ impl PromptWithRevertResponse {
 
 fn get_opt() -> Opt {
     let opt: Opt = Opt::from_args();
-    if opt.archive.as_path().as_os_str().is_empty() {
-        panic!("expected path, got empty string '--archive='");
-    }
+    assert!(
+        !opt.archive.as_path().as_os_str().is_empty(),
+        "expected path, got empty string '--archive='"
+    );
     if let Some(process) = &opt.process {
-        if process.as_path().as_os_str().is_empty() {
-            panic!("expected path, got empty string '--process='");
-        }
+        assert!(
+            !process.as_path().as_os_str().is_empty(),
+            "expected path, got empty string '--process='"
+        );
     }
     opt
 }
 
 fn normalize(archive_metadata: &mut ArchiveMetadata) {
-    let expected_digests: HashSet<FileDigest, RandomState> = HashSet::from_iter(
-        archive_metadata
-            .expected
-            .iter()
-            .map(|record| record.borrow().digest.clone()),
-    );
+    let expected_digests: HashSet<FileDigest, RandomState> = archive_metadata
+        .expected
+        .iter()
+        .map(|record| record.borrow().digest.clone())
+        .collect();
     archive_metadata
         .deleted
         .retain(|record| !expected_digests.contains(&record.digest));
 }
 
 fn check_for_existing_and_changed_files(
-    expected_records: &Vec<RefCell<FileRecord>>,
+    expected_records: &[RefCell<FileRecord>],
     actual_records: &mut Vec<FileRecord>,
     archive_path: &Path,
 ) -> Result<bool, String> {
     let mut all_ok = true;
-    let index: HashMap<String, &RefCell<FileRecord>> = HashMap::from_iter(
-        expected_records
-            .iter()
-            .map(|cell| (cell.borrow().path.clone(), cell)),
-    );
+    let index: HashMap<String, &RefCell<FileRecord>> = expected_records
+        .iter()
+        .map(|cell| (cell.borrow().path.clone(), cell))
+        .collect();
     for actual in actual_records.iter_mut().filter(|elem| !elem.processed) {
         if let Some(expected_cell) = index.get(&actual.path) {
             actual.processed = true;
@@ -407,8 +399,11 @@ fn check_for_existing_and_changed_files(
                     }
                     PromptWithRevertResponse::Revert => {
                         let path = archive_path.join(&actual.path);
-                        filetime::set_file_mtime(&path, FileTime::from_unix_time(expected.mtime, 0))
-                            .map_err(|e| format!("error setting {:?} mtime: {}", path, e))?
+                        filetime::set_file_mtime(
+                            &path,
+                            FileTime::from_unix_time(expected.mtime, 0),
+                        )
+                        .map_err(|e| format!("error setting {:?} mtime: {}", path, e))?;
                     }
                 }
             }
@@ -418,16 +413,15 @@ fn check_for_existing_and_changed_files(
 }
 
 fn check_for_renamed_files(
-    expected_records: &Vec<RefCell<FileRecord>>,
+    expected_records: &[RefCell<FileRecord>],
     actual_records: &mut Vec<FileRecord>,
 ) -> Result<bool, String> {
     let mut all_ok = true;
-    let index: HashMap<(i64, FileDigest), &RefCell<FileRecord>> = HashMap::from_iter(
-        expected_records
-            .iter()
-            .filter(|elem| !elem.borrow().processed)
-            .map(|cell| ((cell.borrow().mtime, cell.borrow().digest.clone()), cell)),
-    );
+    let index: HashMap<(i64, FileDigest), &RefCell<FileRecord>> = expected_records
+        .iter()
+        .filter(|elem| !elem.borrow().processed)
+        .map(|cell| ((cell.borrow().mtime, cell.borrow().digest.clone()), cell))
+        .collect();
     for actual in actual_records.iter_mut().filter(|elem| !elem.processed) {
         if let Some(expected_cell) = index.get(&(actual.mtime, actual.digest.clone())) {
             actual.processed = true;
@@ -515,11 +509,11 @@ fn rename(from: impl AsRef<Path>, to: impl AsRef<Path>) -> Result<(), String> {
 }
 
 fn write_archive_metadata(
-    archive_metadata_path: &PathBuf,
+    archive_metadata_path: &Path,
     archive_metadata: &ArchiveMetadata,
 ) -> Result<(), String> {
     let temp_archive_metadata_path = {
-        let mut s = archive_metadata_path.clone().into_os_string();
+        let mut s = archive_metadata_path.to_path_buf().into_os_string();
         s.push(".tmp");
         PathBuf::from(s)
     };
@@ -536,7 +530,7 @@ fn write_archive_metadata(
         return Ok(());
     }
     let backup_archive_metadata_path = {
-        let mut s = archive_metadata_path.clone().into_os_string();
+        let mut s = archive_metadata_path.to_path_buf().into_os_string();
         s.push(format!(
             ".{}~",
             chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Secs, true)
@@ -575,7 +569,7 @@ fn process_files(
     process_dir: &Path,
 ) -> Result<(), String> {
     let mut records: Vec<FileRecord> = Vec::new();
-    walk_dir(process_dir.as_ref(), &mut records)?;
+    walk_dir(process_dir, &mut records)?;
     records.retain(|record| {
         let file_name = record.file_name();
         file_name != PROCESS_METADATA_JSON
@@ -588,13 +582,12 @@ fn process_files(
     let mut new_files: Vec<FileRecord> = read_json_file(&process_metadata_json_path, true)?;
     {
         let process_digests: HashSet<FileDigest, RandomState> =
-            HashSet::from_iter(records.iter().map(|record| record.digest.clone()));
-        let expected_digests: HashSet<FileDigest, RandomState> = HashSet::from_iter(
-            archive_metadata
-                .expected
-                .iter()
-                .map(|record| record.borrow().digest.clone()),
-        );
+            records.iter().map(|record| record.digest.clone()).collect();
+        let expected_digests: HashSet<FileDigest, RandomState> = archive_metadata
+            .expected
+            .iter()
+            .map(|record| record.borrow().digest.clone())
+            .collect();
         new_files.retain(|new_file| {
             if expected_digests.contains(&new_file.digest) {
                 // File was moved to archive dir.
@@ -610,8 +603,10 @@ fn process_files(
             }
         });
     }
-    let existing_paths: HashMap<(i64, FileDigest), String> =
-        HashMap::from_iter(archive_metadata.expected.iter().map(|record_cell| {
+    let existing_paths: HashMap<(i64, FileDigest), String> = archive_metadata
+        .expected
+        .iter()
+        .map(|record_cell| {
             (
                 (
                     record_cell.borrow().mtime,
@@ -619,25 +614,23 @@ fn process_files(
                 ),
                 record_cell.borrow().path.clone(),
             )
-        }));
-    let deleted_digests: HashSet<FileDigest, RandomState> = HashSet::from_iter(
-        archive_metadata
-            .deleted
-            .iter()
-            .map(|record| record.digest.clone()),
-    );
-    let path_index: HashMap<String, &RefCell<FileRecord>> = HashMap::from_iter(
-        archive_metadata
-            .expected
-            .iter()
-            .map(|r| (r.borrow().path.clone(), r)),
-    );
-    let digest_index: HashMap<FileDigest, &RefCell<FileRecord>> = HashMap::from_iter(
-        archive_metadata
-            .expected
-            .iter()
-            .map(|r| (r.borrow().digest.clone(), r)),
-    );
+        })
+        .collect();
+    let deleted_digests: HashSet<FileDigest, RandomState> = archive_metadata
+        .deleted
+        .iter()
+        .map(|record| record.digest.clone())
+        .collect();
+    let path_index: HashMap<String, &RefCell<FileRecord>> = archive_metadata
+        .expected
+        .iter()
+        .map(|r| (r.borrow().path.clone(), r))
+        .collect();
+    let digest_index: HashMap<FileDigest, &RefCell<FileRecord>> = archive_metadata
+        .expected
+        .iter()
+        .map(|r| (r.borrow().digest.clone(), r))
+        .collect();
     for record in records {
         // Rename dupes.
         if let Some(existing_path) = existing_paths.get(&(record.mtime, record.digest.clone())) {
@@ -679,7 +672,7 @@ fn process_files(
     Ok(())
 }
 
-fn main() -> Result<(), Box<String>> {
+fn main() -> Result<(), String> {
     let opt = get_opt();
     let archive_metadata_path = opt.archive.join(ARCHIVE_METADATA_JSON);
     let mut archive_metadata: ArchiveMetadata = read_json_file(&archive_metadata_path, false)?;

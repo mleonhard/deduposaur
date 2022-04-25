@@ -7,12 +7,14 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, UNIX_EPOCH};
 use temp_dir::TempDir;
 
-const ARCHIVE_METADATA_JSON: &'static str = "deduposaur.archive_metadata.json";
-const PROCESS_METADATA_JSON: &'static str = "deduposaur.process_metadata.json";
-const BIN_NAME: &'static str = "deduposaur";
+const ARCHIVE_METADATA_JSON: &str = "deduposaur.archive_metadata.json";
+const PROCESS_METADATA_JSON: &str = "deduposaur.process_metadata.json";
+const BIN_NAME: &str = "deduposaur";
 /// 2011-11-11T19:11:11Z 2011-11-11T11:11:11-08:00
+#[allow(clippy::unreadable_literal)]
 const TIME1: i64 = 1321038671;
 /// 2021-07-01T19:00:00Z 2021-07-01T12:00:00-07:00
+#[allow(clippy::unreadable_literal)]
 const TIME2: i64 = 1625166000;
 
 fn get_mtime(p: impl AsRef<Path>) -> i64 {
@@ -327,9 +329,9 @@ fn test_renamed() {
         .write_stdin("n") // <------------
         .assert()
         .success()
-        .stdout(predicates::str::diff(format!(
-            "WARNING file1 is renamed to file2\nAccept change? (y/n) \n"
-        )));
+        .stdout(predicates::str::diff(
+            "WARNING file1 is renamed to file2\nAccept change? (y/n) \n",
+        ));
     Command::cargo_bin(BIN_NAME)
         .unwrap()
         .arg(format!("--archive={}", dir.path().to_string_lossy()))
@@ -373,9 +375,9 @@ fn test_deleted() {
         .write_stdin("n") // <------------
         .assert()
         .success()
-        .stdout(predicates::str::diff(format!(
-            "WARNING file2 is deleted\nAccept change? (y/n) \n"
-        )));
+        .stdout(predicates::str::diff(
+            "WARNING file2 is deleted\nAccept change? (y/n) \n",
+        ));
     Command::cargo_bin(BIN_NAME)
         .unwrap()
         .arg(format!("--archive={}", dir.path().to_string_lossy()))
@@ -474,8 +476,7 @@ fn test_metadata_json_file_backups() {
         assert_eq!(2, metadata_backups.len());
         let second_backup = metadata_backups
             .iter()
-            .filter(|filename| filename != &first_backup)
-            .next()
+            .find(|filename| filename != &first_backup)
             .unwrap();
         assert_that!(
             &std::fs::read_to_string(dir.child(first_backup)).unwrap(),

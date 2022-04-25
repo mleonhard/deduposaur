@@ -149,11 +149,11 @@ Functions  Expressions  Impls  Traits  Methods  Dependency
 1/1        44/90        2/2    0/0     0/0      ☢️  ├── chrono 0.4.19
 1/20       10/365       0/2    0/0     5/40     ☢️  │   ├── libc 0.2.124
 0/0        0/0          0/0    0/0     0/0      ❓  │   ├── num-integer 0.1.44
-                                                       │   │   [build-dependencies]
-0/0        0/0          0/0    0/0     0/0      ❓  │   │   └── autocfg 1.1.0
 0/0        4/10         0/0    0/0     0/0      ☢️  │   │   └── num-traits 0.2.14
                                                        │   │       [build-dependencies]
 0/0        0/0          0/0    0/0     0/0      ❓  │   │       └── autocfg 1.1.0
+                                                       │   │   [build-dependencies]
+0/0        0/0          0/0    0/0     0/0      ❓  │   │   └── autocfg 1.1.0
 0/0        4/10         0/0    0/0     0/0      ☢️  │   ├── num-traits 0.2.14
 0/0        5/5          0/0    0/0     0/0      ☢️  │   ├── serde 1.0.136
 0/0        0/0          0/0    0/0     0/0      ❓  │   │   └── serde_derive 1.0.136
@@ -230,8 +230,6 @@ Functions  Expressions  Impls  Traits  Methods  Dependency
 0/0        0/0          0/0    0/0     0/0      ❓          ├── heck 0.3.3
 0/0        0/0          0/0    0/0     0/0      ❓          │   └── unicode-segmentation 1.9.0
 0/0        0/0          0/0    0/0     0/0      🔒          ├── proc-macro-error 1.0.4
-                                                               │   [build-dependencies]
-0/0        0/0          0/0    0/0     0/0      ❓          │   └── version_check 0.9.4
 0/0        0/0          0/0    0/0     0/0      ❓          │   ├── proc-macro-error-attr 1.0.4
                                                                │   │   [build-dependencies]
 0/0        0/0          0/0    0/0     0/0      ❓          │   │   └── version_check 0.9.4
@@ -240,6 +238,8 @@ Functions  Expressions  Impls  Traits  Methods  Dependency
 0/0        12/12        0/0    0/0     3/3      ☢️          │   ├── proc-macro2 1.0.37
 0/0        0/0          0/0    0/0     0/0      ❓          │   ├── quote 1.0.18
 0/0        47/47        3/3    0/0     2/2      ☢️          │   └── syn 1.0.91
+                                                               │   [build-dependencies]
+0/0        0/0          0/0    0/0     0/0      ❓          │   └── version_check 0.9.4
 0/0        12/12        0/0    0/0     3/3      ☢️          ├── proc-macro2 1.0.37
 0/0        0/0          0/0    0/0     0/0      ❓          ├── quote 1.0.18
 0/0        47/47        3/3    0/0     2/2      ☢️          └── syn 1.0.91
@@ -247,3 +247,6 @@ Functions  Expressions  Impls  Traits  Methods  Dependency
 21/44      1564/2168    26/28  8/8     17/52  
 
 ```
+# License
+
+License: Apache-2.0
