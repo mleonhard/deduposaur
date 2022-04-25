@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+set -e
+usage() {
+  echo "$(basename "$0"): ERROR: $1" >&2
+  echo "usage: $(basename "$0") [--filename FILENAME]" >&2
+  exit 1
+}
+
+filename=Readme.md
+while [ $# -gt 0 ]; do
+  case "$1" in
+  --filename)
+    shift
+    [ -n "$1" ] || usage "missing parameter to --filename argument"
+    filename="$1"
+    ;;
+  *) usage "bad argument '$1'" ;;
+  esac
+  shift
+done
+
+echo "PWD=$(pwd)"
+set -x
+cargo readme --no-title --no-indent-headings >"$filename"
+set +x
+
+if grep --quiet 'Cargo Geiger Safety Report' src/main.rs; then
+  time (
+    # "--target not used?"
+    # https://github.com/rust-secure-code/cargo-geiger/issues/95
+
+    # Remove once cargo-geiger stops failing with:
+    # WARNING: Dependency file was never scanned: /Users/user/deduposaur/target/debug/build/rustversion-aa26b2894066e33c/out/version.rs
+    # error: Found 1 warnings
+    set +e
+
+    set -x
+    cargo geiger --all-features --update-readme --readme-path "$filename" --output-format GitHubMarkdown --build-dependencies
+    set +x
+    echo -n "cargo geiger done."
+  )
+fi

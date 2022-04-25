@@ -1,0 +1,36 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+env:
+  CARGO_TERM_COLOR: always
+  CARGO_HOME: cargo/
+
+jobs:
+  check:
+
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v2
+      - uses: actions/cache@v3
+        with:
+          path: |
+            cargo/
+            target/
+          key: ${{ runner.os }}-gen3
+      - run: du -sh cargo/ target/ || true
+      - name: Version
+        run: rustc --version && cargo --version
+      - name: Install rustfmt
+        run: cargo fmt --version || rustup component add rustfmt
+      - name: Install clippy
+        run: cargo clippy --version || rustup component add clippy
+      - run: cargo install cargo-readme
+      - name: Check
+        run: ./check.sh
+      - run: du -sh cargo/ target/ || true

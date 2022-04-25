@@ -128,6 +128,8 @@
 //!    - `structopt` (WTF does command-line processing need unsafe code for?)
 //!    - `serde_json`
 //!    - `sha2`
+//!
+//! # Cargo Geiger Safety Report
 use chrono::TimeZone;
 use filetime::FileTime;
 use serde::{Deserialize, Serialize};
