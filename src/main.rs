@@ -121,11 +121,13 @@
 //! ```
 //!
 //! # TO DO
+//! - Find a way to make it run faster.  Re-validating the archive takes a long time.
+//!   Consider skipping validating the archive when the user specifies `--process`.
 //! - Report duplicates in archive and process dir
 //! - DONE - Integration tests
 //! - DONE - Make tests pass.
 //! - Switch away from libraries with unsafe code:
-//!    - `structopt` (WTF does command-line processing need unsafe code for?)
+//!    - `structopt` (Why does command-line processing need unsafe code for?)
 //!    - `serde_json`
 //!    - `sha2`
 //!
