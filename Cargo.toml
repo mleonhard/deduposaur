@@ -5,7 +5,6 @@ description = "A command-line program to help you add files to your personal arc
 edition = "2018"
 keywords = ["dedupe", "archive", "backup"]
 license = "Apache-2.0"
-publish = false
 name = "deduposaur"
 readme = "Readme.md"
 repository = "https://github.com/mleonhard/deduposaur"
